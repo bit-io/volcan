@@ -1,0 +1,87 @@
+include <ffi>
+include <text>
+
+struct OutputInfo [
+    handle: Int,
+    name: Str,
+    x: Int,
+    y: Int,
+    width: Int,
+    height: Int,
+    scale: Float
+]
+
+!! Uchwyty wszystkich zainicjalizowanych wyjsc.
+fun output_list() -> List<Int> [
+    let out: List<Int> = []
+    let n = ffi_output_count()
+    let i = 0
+    while i < n [
+        out.push(ffi_output_at(i))
+        i = i + 1
+    ]
+    end out
+]
+
+fun output_name(h: Int) -> Str [
+    end text_read(2, h)
+]
+
+fun output_x(h: Int) -> Int [
+    end ffi_output_x(h)
+]
+
+fun output_y(h: Int) -> Int [
+    end ffi_output_y(h)
+]
+
+!! Rozmiar w jednostkach logicznych (po uwzglednieniu skali).
+fun output_width(h: Int) -> Int [
+    end ffi_output_width(h)
+]
+
+fun output_height(h: Int) -> Int [
+    end ffi_output_height(h)
+]
+
+fun output_scale(h: Int) -> Float [
+    end ffi_output_scale(h)
+]
+
+fun output_set_scale(h: Int, scale: Float) [
+    ffi_output_set_scale(h, scale)
+    end
+]
+
+!! Przesuwa wyjscie w globalnym ukladzie (do ukladania monitorow obok siebie).
+fun output_set_pos(h: Int, x: Int, y: Int) [
+    ffi_output_set_pos(h, x, y)
+    end
+]
+
+fun output_repaint(h: Int) [
+    ffi_output_repaint(h)
+    end
+]
+
+fun output_vsync(h: Int) -> Bool [
+    end ffi_output_vsync(h) == 1
+]
+
+fun output_set_vsync(h: Int, enabled: Bool) [
+    if enabled [
+        ffi_output_set_vsync(h, 1)
+    ] else [
+        ffi_output_set_vsync(h, 0)
+    ]
+    end
+]
+
+fun output_repaint_all() [
+    ffi_repaint_all()
+    end
+]
+
+fun output_info(h: Int) -> OutputInfo [
+    end OutputInfo(h, text_read(2, h), ffi_output_x(h), ffi_output_y(h), ffi_output_width(h), ffi_output_height(h), ffi_output_scale(h))
+]
