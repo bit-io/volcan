@@ -1,0 +1,82 @@
+include <ffi>
+include <text>
+
+!! Przyciski myszy (linux/input-event-codes.h).
+const BTN_LEFT: Int = 272
+const BTN_RIGHT: Int = 273
+const BTN_MIDDLE: Int = 274
+
+!! Najczesciej uzywane kody klawiszy (linux/input-event-codes.h).
+const KEY_ESC: Int = 1
+const KEY_ENTER: Int = 28
+const KEY_LEFTCTRL: Int = 29
+const KEY_LEFTSHIFT: Int = 42
+const KEY_LEFTALT: Int = 56
+const KEY_SPACE: Int = 57
+const KEY_F1: Int = 59
+const KEY_Q: Int = 16
+const KEY_T: Int = 20
+const KEY_RIGHTCTRL: Int = 97
+const KEY_RIGHTALT: Int = 100
+const KEY_LEFTMETA: Int = 125
+const KEY_RIGHTMETA: Int = 126
+
+fun cursor_x() -> Float [
+    end ffi_cursor_x()
+]
+
+fun cursor_y() -> Float [
+    end ffi_cursor_y()
+]
+
+fun cursor_move_to(x: Float, y: Float) [
+    ffi_cursor_set_pos(x, y)
+    end
+]
+
+fun cursor_set_visible(visible: Bool) [
+    if visible [
+        ffi_cursor_set_visible(1)
+    ] else [
+        ffi_cursor_set_visible(0)
+    ]
+    end
+]
+
+!! Powierzchnia pod kursorem albo 0.
+fun surface_under_cursor() -> Int [
+    end ffi_surface_at_point(ffi_cursor_x(), ffi_cursor_y())
+]
+
+fun pointer_focus() -> Int [
+    end ffi_pointer_focus()
+]
+
+!! Fokus wskaznika (0 = zdejmij fokus).
+fun pointer_set_focus(h: Int) [
+    ffi_pointer_set_focus(h)
+    end
+]
+
+fun keyboard_focus() -> Int [
+    end ffi_keyboard_focus()
+]
+
+!! Fokus klawiatury (0 = zdejmij fokus).
+fun keyboard_set_focus(h: Int) [
+    ffi_keyboard_set_focus(h)
+    end
+]
+
+fun key_pressed(code: Int) -> Bool [
+    end ffi_key_pressed(code) == 1
+]
+
+!! Aktywne okno toplevel (uchwyt powierzchni) albo 0.
+fun active_toplevel() -> Int [
+    end ffi_active_toplevel()
+]
+
+fun seat_name() -> Str [
+    end text_read(3, 0)
+]
