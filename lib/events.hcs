@@ -1,0 +1,133 @@
+include <ffi>
+
+const EV_NONE: Int = 0
+const EV_SURFACE_CREATED: Int = 1
+const EV_SURFACE_DESTROYED: Int = 2
+const EV_SURFACE_MAPPED: Int = 3
+const EV_SURFACE_UNMAPPED: Int = 4
+const EV_TOPLEVEL_TITLE: Int = 5
+const EV_TOPLEVEL_APP_ID: Int = 6
+const EV_MOVE_REQUEST: Int = 7
+const EV_RESIZE_REQUEST: Int = 8
+const EV_MAXIMIZE_REQUEST: Int = 9
+const EV_UNMAXIMIZE_REQUEST: Int = 10
+const EV_FULLSCREEN_REQUEST: Int = 11
+const EV_UNFULLSCREEN_REQUEST: Int = 12
+const EV_MINIMIZE_REQUEST: Int = 13
+const EV_UNMINIMIZE_REQUEST: Int = 14
+const EV_CLOSE_REQUEST: Int = 15
+const EV_ACTIVATE_REQUEST: Int = 16
+const EV_OUTPUT_PLUGGED: Int = 20
+const EV_OUTPUT_UNPLUGGED: Int = 21
+const EV_POINTER_MOVE: Int = 30
+const EV_POINTER_BUTTON: Int = 31
+const EV_KEY: Int = 32
+const EV_ACTIVE_TOPLEVEL: Int = 40
+const EV_SURFACE_ROLE: Int = 50
+
+!! Maski krawedzi w EV_RESIZE_REQUEST (pole b).
+const EDGE_TOP: Int = 1
+const EDGE_BOTTOM: Int = 2
+const EDGE_LEFT: Int = 4
+const EDGE_RIGHT: Int = 8
+
+!! Znaczenie pol zalezy od rodzaju:
+!!   powierzchnia/toplevel: a = uchwyt powierzchni
+!!   EV_RESIZE_REQUEST: b = maska krawedzi; EV_FULLSCREEN_REQUEST: b = uchwyt wyjscia (0 = dowolne)
+!!   EV_SURFACE_ROLE: b = rola (patrz surface.hcs, ROLE_*)
+!!   EV_OUTPUT_*: a = uchwyt wyjscia
+!!   EV_POINTER_MOVE: x, y = delta; EV_POINTER_BUTTON: a = przycisk, b = 1 wcisniety / 0 puszczony
+!!   EV_KEY: a = kod klawisza (linux input), b = 1 wcisniety / 0 puszczony
+!!   EV_ACTIVE_TOPLEVEL: a = uchwyt nowej aktywnej powierzchni albo 0
+struct Event [
+    kind: Int,
+    a: Int,
+    b: Int,
+    x: Float,
+    y: Float
+]
+
+!! Pobiera nastepne zdarzenie; gdy kolejka pusta, zwraca Event z kind == EV_NONE.
+fun event_next() -> Event [
+    if ffi_poll() == 0 [
+        end Event(0, 0, 0, 0.0, 0.0)
+    ]
+    end Event(ffi_ev_kind(), ffi_ev_a(), ffi_ev_b(), ffi_ev_x(), ffi_ev_y())
+]
+
+!! Czytelna nazwa rodzaju zdarzenia (do logow).
+fun event_name(kind: Int) -> Str [
+    if kind == EV_NONE [
+        end "none"
+    ]
+    if kind == EV_SURFACE_CREATED [
+        end "surface_created"
+    ]
+    if kind == EV_SURFACE_DESTROYED [
+        end "surface_destroyed"
+    ]
+    if kind == EV_SURFACE_MAPPED [
+        end "surface_mapped"
+    ]
+    if kind == EV_SURFACE_UNMAPPED [
+        end "surface_unmapped"
+    ]
+    if kind == EV_TOPLEVEL_TITLE [
+        end "toplevel_title"
+    ]
+    if kind == EV_TOPLEVEL_APP_ID [
+        end "toplevel_app_id"
+    ]
+    if kind == EV_MOVE_REQUEST [
+        end "move_request"
+    ]
+    if kind == EV_RESIZE_REQUEST [
+        end "resize_request"
+    ]
+    if kind == EV_MAXIMIZE_REQUEST [
+        end "maximize_request"
+    ]
+    if kind == EV_UNMAXIMIZE_REQUEST [
+        end "unmaximize_request"
+    ]
+    if kind == EV_FULLSCREEN_REQUEST [
+        end "fullscreen_request"
+    ]
+    if kind == EV_UNFULLSCREEN_REQUEST [
+        end "unfullscreen_request"
+    ]
+    if kind == EV_MINIMIZE_REQUEST [
+        end "minimize_request"
+    ]
+    if kind == EV_UNMINIMIZE_REQUEST [
+        end "unminimize_request"
+    ]
+    if kind == EV_CLOSE_REQUEST [
+        end "close_request"
+    ]
+    if kind == EV_ACTIVATE_REQUEST [
+        end "activate_request"
+    ]
+    if kind == EV_OUTPUT_PLUGGED [
+        end "output_plugged"
+    ]
+    if kind == EV_OUTPUT_UNPLUGGED [
+        end "output_unplugged"
+    ]
+    if kind == EV_POINTER_MOVE [
+        end "pointer_move"
+    ]
+    if kind == EV_POINTER_BUTTON [
+        end "pointer_button"
+    ]
+    if kind == EV_KEY [
+        end "key"
+    ]
+    if kind == EV_ACTIVE_TOPLEVEL [
+        end "active_toplevel"
+    ]
+    if kind == EV_SURFACE_ROLE [
+        end "surface_role"
+    ]
+    end "unknown"
+]
