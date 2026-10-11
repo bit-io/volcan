@@ -1,0 +1,76 @@
+using <0.5>
+
+!! Minimalny kompozytor na volcan: startuje Louvre z domyslnym zachowaniem,
+!! odpala terminal i reaguje na zdarzenia skryptem.
+!!
+!!   Super + Q      zamyka aktywne okno
+!!   Ctrl+Alt+Esc   konczy kompozytor
+!!   klik lewym     ustawia fokus na oknie pod kursorem
+!!
+!! Terminal: zmienna VOLCAN_TERMINAL (domyslnie "foot").
+get <bit:volcan>
+get <std:env> import <env_var_or>
+
+!! Powierzchnia pod kursorem moze byc subpowierzchnia albo popupem - idziemy
+!! w gore po rodzicach do okna glownego.
+fun root_surface(h: Int) -> Int [
+    let cur = h
+    let guard = 0
+    while cur != 0 and surface_parent(cur) != 0 and guard < 32 [
+        cur = surface_parent(cur)
+        guard = guard + 1
+    ]
+    end cur
+]
+
+fun on_event(ev: Event) [
+    if ev.kind == EV_SURFACE_MAPPED [
+        if surface_role(ev.a) == ROLE_TOPLEVEL [
+            log("okno:", toplevel_title(ev.a), "app_id:", toplevel_app_id(ev.a))
+            toplevel_focus(ev.a)
+        ]
+    ]
+    if ev.kind == EV_TOPLEVEL_TITLE [
+        log("tytul ->", toplevel_title(ev.a))
+    ]
+    if ev.kind == EV_OUTPUT_PLUGGED [
+        log("monitor:", output_name(ev.a), output_width(ev.a), "x", output_height(ev.a))
+    ]
+    if ev.kind == EV_POINTER_BUTTON and ev.b == 1 and ev.a == BTN_LEFT [
+        let under = root_surface(surface_under_cursor())
+        if under != 0 and surface_role(under) == ROLE_TOPLEVEL [
+            toplevel_focus(under)
+        ]
+    ]
+    if ev.kind == EV_KEY and ev.b == 1 [
+        if ev.a == KEY_Q and key_pressed(KEY_LEFTMETA) [
+            let active = active_toplevel()
+            if active != 0 [
+                toplevel_close(active)
+            ]
+        ]
+        if ev.a == KEY_ESC and key_pressed(KEY_LEFTCTRL) and key_pressed(KEY_LEFTALT) [
+            compositor_stop()
+        ]
+    ]
+    end
+]
+
+fun main() [
+    log("volcan", VOLCAN_VERSION, "(Louvre", VOLCAN_LOUVRE + ")")
+    if not compositor_boot("volcan") [
+        log("nie udalo sie wystartowac kompozytora")
+        end
+    ]
+    compositor_spawn(env_var_or("VOLCAN_TERMINAL", "foot"))
+    while compositor_running() [
+        compositor_dispatch(10)
+        let ev = event_next()
+        while ev.kind != EV_NONE [
+            on_event(ev)
+            ev = event_next()
+        ]
+    ]
+    compositor_destroy()
+    end
+]
