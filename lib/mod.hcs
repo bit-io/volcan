@@ -1,0 +1,13 @@
+include <ffi>
+include <text>
+include <events>
+include <compositor>   !! dociaga tez shim i link
+include <surface>
+include <output>
+include <input>
+
+!! Wersja biblioteki volcan.
+const VOLCAN_VERSION: Str = "0.1.0"
+
+!! Wersja Louvre, dla ktorej pisane sa bindingi.
+const VOLCAN_LOUVRE: Str = "3.0.0"
