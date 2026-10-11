@@ -1,6 +1,16 @@
-use "bytes -> volcan/0.1.0" from "volcan"
+[package]
+-> name        => volcan-minimal
+-> version     => 0.1.0
+-> description => Minimal Wayland compositor on volcan (Louvre bindings).
+-> lang        => hs
 
-fn main() is
-    let comp = volcan::compositor("/dev/dri/card0", "pl", false, true)
-    volcan::run(comp)
-end
+[build]
+-> link => static
+
+[default-build]
+-> profile => release
+-> run     => false
+
+[dependencies]
+-> volcan
+--> path => ../..
