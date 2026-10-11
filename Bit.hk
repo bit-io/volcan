@@ -1,27 +1,19 @@
 [package]
 -> name        => volcan
 -> version     => 0.1.0
--> description => Produkcyjny szkielet do pisania kompozytorow Wayland w H# - odpowiednik rustowego smithay, w 100% napisany w H#
--> author      => Bytes Developers
+-> description => Wayland compositor library for HackerScript - bindings to Louvre (C++), inspired by smithay.
+-> authors     => ["Bit Developers"]
 -> license     => MIT
+-> lang        => HackerScript
+
+[layout]
+-> lib => lib
+
+[lib]
+-> output => hlib
 
 [build]
--> lang   => h#
--> entry  => src/volcan.h#
--> output => build/libvolcan
+-> link => static
 
-[deps]
--> libc          => dynamic
--> wayland-server => dynamic   ;; trzymane jako dokumentacja ABI / ścieżka hybrydowa (patrz ffi/wayland_server.h#)
--> drm            => dynamic
--> gbm            => dynamic
--> EGL            => dynamic
--> GLESv2         => dynamic
--> input          => dynamic
--> xcb            => dynamic
--> udev           => dynamic
--> xkbcommon      => dynamic
--> seat           => dynamic   ;; libseat (patrz ffi/libseat.h# — częściowo zablokowane, patrz komentarz w pliku)
-
-[runtime]
--> xwayland_binary => "Xwayland"
+[default-build]
+-> profile => release
