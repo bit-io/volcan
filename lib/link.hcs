@@ -1,0 +1,14 @@
+get <extern:cz-louvre> use <dynamic>
+region [
+    fun vcn_abi_version() -> Int
+]
+
+!! Wersja ABI shima (1). Sluzy tez jako test, czy cala konstrukcja zlinkowala sie.
+fun volcan_abi() -> Int [
+    end vcn_abi_version()
+]
+
+!! Czy symbole shima sa widoczne (1 == wersja ABI, ktora ta biblioteka zna).
+fun volcan_linked() -> Bool [
+    end vcn_abi_version() == 1
+]
