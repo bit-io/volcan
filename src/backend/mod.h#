@@ -1,5 +1,0 @@
-mod drmb
-mod inputb
-mod udevmon
-mod session
-mod keymap
