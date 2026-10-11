@@ -1,0 +1,129 @@
+include <shim>
+include <link>
+include <ffi>
+include <text>
+
+!! Stany kompozytora (LCompositor::CompositorState).
+const STATE_UNINITIALIZED: Int = 0
+const STATE_INITIALIZING: Int = 1
+const STATE_INITIALIZED: Int = 2
+const STATE_UNINITIALIZING: Int = 3
+const STATE_PAUSING: Int = 4
+const STATE_PAUSED: Int = 5
+const STATE_RESUMING: Int = 6
+
+fun volcan_flag(b: Bool) -> Int [
+    if b [
+        end 1
+    ]
+    end 0
+]
+
+!! setenv(name, value); gdy overwrite == false, istniejaca zmienna zostaje.
+fun compositor_setenv(name: Str, value: Str, overwrite: Bool) -> Bool [
+    ffi_buf_clear(0)
+    ffi_buf_clear(1)
+    text_push(0, name)
+    text_push(1, value)
+    end ffi_setenv(volcan_flag(overwrite)) == 1
+]
+
+!! Ustawia srodowisko Louvre tak jak przyklad cz-louvre-default - nie nadpisuje
+!! zmiennych ustawionych przez uzytkownika. `display` to nazwa gniazda Wayland.
+fun compositor_defaults(display: Str) [
+    compositor_setenv("CZ_LOUVRE_WAYLAND_DISPLAY", display, false)
+    compositor_setenv("CZ_LOUVRE_ENABLE_LIBSEAT", "1", false)
+    compositor_setenv("CZ_CORE_LOG_LEVEL", "3", false)
+    compositor_setenv("CZ_REAM_LOG_LEVEL", "3", false)
+    compositor_setenv("CZ_SRM_LOG_LEVEL", "3", false)
+    compositor_setenv("CZ_LOUVRE_LOG_LEVEL", "4", false)
+    end
+]
+
+!! Startuje demona LLauncher (MUSI byc przed utworzeniem kompozytora) i tworzy
+!! obiekt kompozytora. Zwraca false, gdy sie nie udalo.
+fun compositor_create() -> Bool [
+    volcan_shim_link()
+    if not volcan_linked() [
+        log("volcan: shim niezlinkowany albo inna wersja ABI")
+        end false
+    ]
+    ffi_launcher_start()
+    end ffi_init() == 1
+]
+
+!! LCompositor::start() - inicjalizuje backend, wyjscia, gniazdo Wayland.
+fun compositor_start() -> Bool [
+    end ffi_start() == 1
+]
+
+!! Wszystko naraz: srodowisko + launcher + kompozytor + start.
+fun compositor_boot(display: Str) -> Bool [
+    compositor_defaults(display)
+    if not compositor_create() [
+        log("volcan: nie udalo sie utworzyc kompozytora")
+        end false
+    ]
+    if not compositor_start() [
+        log("volcan: LCompositor::start() nie powiodlo sie")
+        end false
+    ]
+    end true
+]
+
+!! Jeden obrot petli zdarzen Louvre; ms_timeout == -1 czeka bez limitu.
+fun compositor_dispatch(ms_timeout: Int) -> Int [
+    end ffi_dispatch(ms_timeout)
+]
+
+fun compositor_state() -> Int [
+    end ffi_state()
+]
+
+!! Czy kompozytor wystartowal i jeszcze nie zostal zatrzymany.
+fun compositor_running() -> Bool [
+    let st = ffi_state()
+    end st > 0
+]
+
+!! Deskryptor petli zdarzen (do wlasnego poll/epoll).
+fun compositor_fd() -> Int [
+    end ffi_fd()
+]
+
+!! LCompositor::finish() - petla zakonczy sie przy najblizszym dispatch.
+fun compositor_stop() [
+    ffi_finish()
+    end
+]
+
+!! Zwalnia obiekt kompozytora. Po tym nie wolno wolac zadnych funkcji volcan.
+fun compositor_destroy() [
+    ffi_destroy()
+    end
+]
+
+!! Tryb reczny: zadania okien (move/resize/maximize/close/...) NIE sa
+!! obslugiwane domyslnie przez Louvre - przychodza tylko jako zdarzenia i to
+!! skrypt decyduje, co zrobic. Tryb domyslny (false) zostawia zachowanie Louvre
+!! i dodatkowo wysyla zdarzenia.
+fun compositor_manual_policy(manual_mode: Bool) [
+    ffi_set_manual_policy(volcan_flag(manual_mode))
+    end
+]
+
+!! Uruchamia polecenie powloki jako klienta tego kompozytora (WAYLAND_DISPLAY
+!! ustawiany z CZ_LOUVRE_WAYLAND_DISPLAY).
+fun compositor_spawn(command: Str) -> Bool [
+    ffi_buf_clear(0)
+    text_push(0, command)
+    end ffi_spawn() == 1
+]
+
+!! Prosta petla: dispatch az kompozytor sie zakonczy. Zwraca kod wyjscia.
+fun compositor_run() -> Int [
+    while compositor_running() [
+        ffi_dispatch(-1)
+    ]
+    end 0
+]
