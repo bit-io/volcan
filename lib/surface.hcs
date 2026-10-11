@@ -1,0 +1,221 @@
+include <ffi>
+include <text>
+
+const ROLE_NONE: Int = 0
+const ROLE_SUBSURFACE: Int = 1
+const ROLE_CURSOR: Int = 2
+const ROLE_POPUP: Int = 3
+const ROLE_DND_ICON: Int = 4
+const ROLE_TOPLEVEL: Int = 5
+const ROLE_SESSION_LOCK: Int = 6
+const ROLE_LAYER: Int = 7
+
+struct SurfaceInfo [
+    handle: Int,
+    role: Int,
+    mapped: Bool,
+    x: Int,
+    y: Int,
+    width: Int,
+    height: Int,
+    title: Str,
+    app_id: Str
+]
+
+!! Wszystkie zyjace powierzchnie, w kolejnosci z LCompositor::surfaces().
+fun surface_list() -> List<Int> [
+    let out: List<Int> = []
+    let n = ffi_surface_count()
+    let i = 0
+    while i < n [
+        out.push(ffi_surface_at(i))
+        i = i + 1
+    ]
+    end out
+]
+
+!! Tylko zmapowane okna toplevel (to, co zwykle chcesz ukladac).
+fun toplevel_list() -> List<Int> [
+    let out: List<Int> = []
+    let n = ffi_surface_count()
+    let i = 0
+    while i < n [
+        let h = ffi_surface_at(i)
+        if ffi_surface_role(h) == ROLE_TOPLEVEL and ffi_surface_mapped(h) == 1 [
+            out.push(h)
+        ]
+        i = i + 1
+    ]
+    end out
+]
+
+fun surface_valid(h: Int) -> Bool [
+    end ffi_surface_valid(h) == 1
+]
+
+fun surface_role(h: Int) -> Int [
+    end ffi_surface_role(h)
+]
+
+fun surface_mapped(h: Int) -> Bool [
+    end ffi_surface_mapped(h) == 1
+]
+
+fun surface_x(h: Int) -> Int [
+    end ffi_surface_x(h)
+]
+
+fun surface_y(h: Int) -> Int [
+    end ffi_surface_y(h)
+]
+
+fun surface_width(h: Int) -> Int [
+    end ffi_surface_width(h)
+]
+
+fun surface_height(h: Int) -> Int [
+    end ffi_surface_height(h)
+]
+
+fun surface_move(h: Int, x: Int, y: Int) [
+    ffi_surface_set_pos(h, x, y)
+    end
+]
+
+fun surface_raise(h: Int) [
+    ffi_surface_raise(h)
+    end
+]
+
+fun surface_parent(h: Int) -> Int [
+    end ffi_surface_parent(h)
+]
+
+!! Powierzchnia pod punktem (wspolrzedne globalne) albo 0.
+fun surface_at_point(x: Float, y: Float) -> Int [
+    end ffi_surface_at_point(x, y)
+]
+
+fun surface_has_pointer_focus(h: Int) -> Bool [
+    end ffi_surface_has_pointer_focus(h) == 1
+]
+
+fun surface_has_keyboard_focus(h: Int) -> Bool [
+    end ffi_surface_has_keyboard_focus(h) == 1
+]
+
+fun toplevel_title(h: Int) -> Str [
+    end text_read(0, h)
+]
+
+fun toplevel_app_id(h: Int) -> Str [
+    end text_read(1, h)
+]
+
+fun toplevel_activated(h: Int) -> Bool [
+    end ffi_toplevel_activated(h) == 1
+]
+
+fun toplevel_maximized(h: Int) -> Bool [
+    end ffi_toplevel_maximized(h) == 1
+]
+
+fun toplevel_fullscreen(h: Int) -> Bool [
+    end ffi_toplevel_fullscreen(h) == 1
+]
+
+fun toplevel_minimized(h: Int) -> Bool [
+    end ffi_toplevel_minimized(h) == 1
+]
+
+fun toplevel_set_activated(h: Int, enabled: Bool) [
+    if enabled [
+        ffi_toplevel_set_activated(h, 1)
+    ] else [
+        ffi_toplevel_set_activated(h, 0)
+    ]
+    end
+]
+
+fun toplevel_set_maximized(h: Int, enabled: Bool) [
+    if enabled [
+        ffi_toplevel_set_maximized(h, 1)
+    ] else [
+        ffi_toplevel_set_maximized(h, 0)
+    ]
+    end
+]
+
+fun toplevel_set_fullscreen(h: Int, enabled: Bool) [
+    if enabled [
+        ffi_toplevel_set_fullscreen(h, 1)
+    ] else [
+        ffi_toplevel_set_fullscreen(h, 0)
+    ]
+    end
+]
+
+fun toplevel_set_minimized(h: Int, enabled: Bool) [
+    if enabled [
+        ffi_toplevel_set_minimized(h, 1)
+    ] else [
+        ffi_toplevel_set_minimized(h, 0)
+    ]
+    end
+]
+
+!! Prosba o zmiane rozmiaru (klient odpowie nowym commit).
+fun toplevel_resize(h: Int, width: Int, height: Int) [
+    ffi_toplevel_configure_size(h, width, height)
+    end
+]
+
+!! Prosi klienta o zamkniecie okna.
+fun toplevel_close(h: Int) [
+    ffi_toplevel_close(h)
+    end
+]
+
+!! Geometria okna bez cieni/dekoracji klienta (windowGeometry()).
+fun toplevel_window_x(h: Int) -> Int [
+    end ffi_toplevel_window_x(h)
+]
+
+fun toplevel_window_y(h: Int) -> Int [
+    end ffi_toplevel_window_y(h)
+]
+
+fun toplevel_window_width(h: Int) -> Int [
+    end ffi_toplevel_window_width(h)
+]
+
+fun toplevel_window_height(h: Int) -> Int [
+    end ffi_toplevel_window_height(h)
+]
+
+!! Fokus jak w typowym menedzerze okien: poprzednio aktywne okno traci stan
+!! aktywny, to dostaje stan aktywny, fokus klawiatury i wedruje na wierzch.
+fun toplevel_focus(h: Int) [
+    if ffi_surface_valid(h) == 0 [
+        end
+    ]
+    let prev = ffi_active_toplevel()
+    if prev != 0 and prev != h [
+        ffi_toplevel_set_activated(prev, 0)
+    ]
+    ffi_surface_raise(h)
+    ffi_toplevel_set_activated(h, 1)
+    ffi_keyboard_set_focus(h)
+    end
+]
+
+fun surface_info(h: Int) -> SurfaceInfo [
+    let role = ffi_surface_role(h)
+    let title = ""
+    let app_id = ""
+    if role == ROLE_TOPLEVEL [
+        title = text_read(0, h)
+        app_id = text_read(1, h)
+    ]
+    end SurfaceInfo(h, role, ffi_surface_mapped(h) == 1, ffi_surface_x(h), ffi_surface_y(h), ffi_surface_width(h), ffi_surface_height(h), title, app_id)
+]
