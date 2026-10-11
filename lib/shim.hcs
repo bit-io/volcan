@@ -1,0 +1,639 @@
+fun volcan_shim_link() -> Int [
+    native {C++} [
+        #include <CZ/Louvre/LCompositor.h>
+        #include <CZ/Louvre/LLauncher.h>
+        #include <CZ/Louvre/LLog.h>
+        #include <CZ/Louvre/Cursor/LCursor.h>
+        #include <CZ/Louvre/Seat/LSeat.h>
+        #include <CZ/Louvre/Seat/LPointer.h>
+        #include <CZ/Louvre/Seat/LKeyboard.h>
+        #include <CZ/Louvre/Seat/LOutput.h>
+        #include <CZ/Louvre/Roles/LSurface.h>
+        #include <CZ/Louvre/Roles/LToplevelRole.h>
+        #include <cstdint>
+        #include <cstdlib>
+        #include <deque>
+        #include <string>
+        #include <unistd.h>
+        #include <sys/types.h>
+        #include <sys/wait.h>
+        }
+
+        using namespace CZ;
+
+        namespace
+        {
+        struct Ev
+        {
+            int64_t kind;
+            int64_t a;
+            int64_t b;
+            double x;
+            double y;
+        };
+
+        std::deque<Ev> g_queue;
+        Ev g_cur { 0, 0, 0, 0.0, 0.0 };
+        bool g_manual { false };
+        std::string g_buf0;
+        std::string g_buf1;
+
+        void push(int64_t kind, int64_t a = 0, int64_t b = 0, double x = 0.0, double y = 0.0)
+        {
+            if (g_queue.size() >= 8192)
+                g_queue.pop_front();
+            g_queue.push_back(Ev { kind, a, b, x, y });
+        }
+
+        int64_t H(const void *p)
+        {
+            return (int64_t)(intptr_t)p;
+        }
+
+        // ---- podklasy fabryczne: tylko doklejaja zdarzenia, zachowanie bazowe zostaje ----
+
+        class VSurface : public LSurface
+        {
+        public:
+            VSurface(const void *params) noexcept : LSurface(params)
+            {
+                push(1, H(this));
+            }
+
+            void mappingChanged() override
+            {
+                LSurface::mappingChanged();
+                push(mapped() ? 3 : 4, H(this));
+            }
+
+            void roleChanged() noexcept override
+            {
+                LSurface::roleChanged();
+                push(50, H(this), (int64_t)roleId());
+            }
+        };
+
+        class VToplevel : public LToplevelRole
+        {
+        public:
+            VToplevel(const void *params) noexcept : LToplevelRole(params) {}
+
+            int64_t sh() const
+            {
+                return H(surface());
+            }
+
+            void titleChanged() override
+            {
+                LToplevelRole::titleChanged();
+                push(5, sh());
+            }
+
+            void appIdChanged() override
+            {
+                LToplevelRole::appIdChanged();
+                push(6, sh());
+            }
+
+            void startMoveRequest(const CZEvent &e) override
+            {
+                if (!g_manual)
+                    LToplevelRole::startMoveRequest(e);
+                push(7, sh());
+            }
+
+            void startResizeRequest(const CZEvent &e, CZBitset<CZEdge> edge) override
+            {
+                if (!g_manual)
+                    LToplevelRole::startResizeRequest(e, edge);
+                int64_t mask = 0;
+                if (edge.has(CZEdgeTop))
+                    mask |= 1;
+                if (edge.has(CZEdgeBottom))
+                    mask |= 2;
+                if (edge.has(CZEdgeLeft))
+                    mask |= 4;
+                if (edge.has(CZEdgeRight))
+                    mask |= 8;
+                push(8, sh(), mask);
+            }
+
+            void setMaximizedRequest() override
+            {
+                if (!g_manual)
+                    LToplevelRole::setMaximizedRequest();
+                push(9, sh());
+            }
+
+            void unsetMaximizedRequest() override
+            {
+                if (!g_manual)
+                    LToplevelRole::unsetMaximizedRequest();
+                push(10, sh());
+            }
+
+            void setFullscreenRequest(LOutput *dest) override
+            {
+                if (!g_manual)
+                    LToplevelRole::setFullscreenRequest(dest);
+                push(11, sh(), H(dest));
+            }
+
+            void unsetFullscreenRequest() override
+            {
+                if (!g_manual)
+                    LToplevelRole::unsetFullscreenRequest();
+                push(12, sh());
+            }
+
+            void setMinimizedRequest() override
+            {
+                if (!g_manual)
+                    LToplevelRole::setMinimizedRequest();
+                push(13, sh());
+            }
+
+            void unsetMinimizedRequest() override
+            {
+                if (!g_manual)
+                    LToplevelRole::unsetMinimizedRequest();
+                push(14, sh());
+            }
+
+            void closeRequest() override
+            {
+                if (!g_manual)
+                    LToplevelRole::closeRequest();
+                push(15, sh());
+            }
+
+            void activateRequest() override
+            {
+                if (!g_manual)
+                    LToplevelRole::activateRequest();
+                push(16, sh());
+            }
+        };
+
+        class VSeat : public LSeat
+        {
+        public:
+            VSeat(const void *params) noexcept : LSeat(params) {}
+
+            void outputPlugged(LOutput *output) override
+            {
+                LSeat::outputPlugged(output);
+                push(20, H(output));
+            }
+
+            void outputUnplugged(LOutput *output) override
+            {
+                push(21, H(output));
+                LSeat::outputUnplugged(output);
+            }
+
+            void activeToplevelChanged(LToplevelRole *prev) noexcept override
+            {
+                LSeat::activeToplevelChanged(prev);
+                LToplevelRole *t = activeToplevel();
+                push(40, t ? H(t->surface()) : 0);
+            }
+        };
+
+        class VPointer : public LPointer
+        {
+        public:
+            VPointer(const void *params) noexcept : LPointer(params) {}
+
+            void pointerMoveEvent(const CZPointerMoveEvent &e) override
+            {
+                push(30, 0, 0, (double)e.delta.x(), (double)e.delta.y());
+                LPointer::pointerMoveEvent(e);
+            }
+
+            void pointerButtonEvent(const CZPointerButtonEvent &e) override
+            {
+                push(31, (int64_t)e.button, e.pressed ? 1 : 0);
+                LPointer::pointerButtonEvent(e);
+            }
+        };
+
+        class VKeyboard : public LKeyboard
+        {
+        public:
+            VKeyboard(const void *params) noexcept : LKeyboard(params) {}
+
+            void keyEvent(const CZKeyboardKeyEvent &e) override
+            {
+                push(32, (int64_t)e.code, e.isPressed ? 1 : 0);
+                LKeyboard::keyEvent(e);
+            }
+        };
+
+        class VCompositor : public LCompositor
+        {
+        public:
+            LFactoryObject *createObjectRequest(LFactoryObject::Type type, const void *params) override
+            {
+                switch (type)
+                {
+                case LFactoryObject::Type::LSurface:
+                    return new VSurface(params);
+                case LFactoryObject::Type::LToplevelRole:
+                    return new VToplevel(params);
+                case LFactoryObject::Type::LSeat:
+                    return new VSeat(params);
+                case LFactoryObject::Type::LPointer:
+                    return new VPointer(params);
+                case LFactoryObject::Type::LKeyboard:
+                    return new VKeyboard(params);
+                default:
+                    return nullptr;
+                }
+            }
+
+            void onAnticipatedObjectDestruction(LFactoryObject *object) override
+            {
+                if (object->factoryObjectType() == LFactoryObject::Type::LSurface)
+                    push(2, H(static_cast<LSurface *>(object)));
+            }
+        };
+
+        VCompositor *g_comp = nullptr;
+
+        // ---- walidacja uchwytow: uchwyt musi nalezec do zywego obiektu ----
+
+        LSurface *surf(int64_t h)
+        {
+            if (!g_comp || h == 0)
+                return nullptr;
+            for (LSurface *s : g_comp->surfaces())
+                if (H(s) == h)
+                    return s;
+            return nullptr;
+        }
+
+        LToplevelRole *top(int64_t h)
+        {
+            LSurface *s = surf(h);
+            return s ? s->toplevel() : nullptr;
+        }
+
+        LOutput *outp(int64_t h)
+        {
+            if (!g_comp || h == 0)
+                return nullptr;
+            for (LOutput *o : g_comp->outputs())
+                if (H(o) == h)
+                    return o;
+            return nullptr;
+        }
+
+        int64_t str_len(const std::string &s)
+        {
+            return (int64_t)s.size();
+        }
+
+        int64_t str_at(const std::string &s, int64_t i)
+        {
+            if (i < 0 || i >= (int64_t)s.size())
+                return -1;
+            return (int64_t)(unsigned char)s.at((size_t)i);
+        }
+        }
+
+        extern "C"
+        {
+        // ---- cykl zycia ----
+        int64_t vcn_abi_version(void) { return 1; }
+        int64_t vcn_launcher_start(void) { return (int64_t)LLauncher::startDaemon(); }
+
+        int64_t vcn_init(void)
+        {
+            if (!g_comp)
+                g_comp = new VCompositor();
+            return g_comp ? 1 : 0;
+        }
+
+        int64_t vcn_start(void) { return (g_comp && g_comp->start()) ? 1 : 0; }
+        int64_t vcn_dispatch(int64_t ms) { return g_comp ? (int64_t)g_comp->dispatch((int)ms) : -1; }
+        int64_t vcn_state(void) { return g_comp ? (int64_t)g_comp->state() : -1; }
+        int64_t vcn_fd(void) { return g_comp ? (int64_t)g_comp->fd() : -1; }
+
+        void vcn_finish(void)
+        {
+            if (g_comp)
+                g_comp->finish();
+        }
+
+        void vcn_destroy(void)
+        {
+            delete g_comp;
+            g_comp = nullptr;
+            g_queue.clear();
+        }
+
+        // ---- bufory napisow ----
+        void vcn_buf_clear(int64_t slot)
+        {
+            if (slot == 0)
+                g_buf0.clear();
+            else
+                g_buf1.clear();
+        }
+
+        void vcn_buf_push(int64_t slot, int64_t byte)
+        {
+            char c = (char)(byte & 0xFF);
+            if (slot == 0)
+                g_buf0.push_back(c);
+            else
+                g_buf1.push_back(c);
+        }
+
+        int64_t vcn_setenv(int64_t overwrite)
+        {
+            return setenv(g_buf0.c_str(), g_buf1.c_str(), overwrite ? 1 : 0) == 0 ? 1 : 0;
+        }
+
+        int64_t vcn_spawn(void)
+        {
+            // podwojny fork: brak zombie, nie ruszamy obslugi sygnalow Louvre
+            pid_t child = fork();
+            if (child < 0)
+                return 0;
+            if (child == 0)
+            {
+                pid_t grand = fork();
+                if (grand != 0)
+                    _exit(0);
+                const char *disp = getenv("CZ_LOUVRE_WAYLAND_DISPLAY");
+                if (disp)
+                    setenv("WAYLAND_DISPLAY", disp, 1);
+                execl("/bin/sh", "sh", "-c", g_buf0.c_str(), (char *)nullptr);
+                _exit(127);
+            }
+            int status = 0;
+            waitpid(child, &status, 0);
+            return 1;
+        }
+
+        void vcn_set_manual_policy(int64_t manual) { g_manual = manual != 0; }
+
+        // ---- kolejka zdarzen ----
+        int64_t vcn_poll(void)
+        {
+            if (g_queue.empty())
+                return 0;
+            g_cur = g_queue.front();
+            g_queue.pop_front();
+            return 1;
+        }
+
+        int64_t vcn_ev_kind(void) { return g_cur.kind; }
+        int64_t vcn_ev_a(void) { return g_cur.a; }
+        int64_t vcn_ev_b(void) { return g_cur.b; }
+        double vcn_ev_x(void) { return g_cur.x; }
+        double vcn_ev_y(void) { return g_cur.y; }
+
+        // ---- powierzchnie ----
+        int64_t vcn_surface_count(void) { return g_comp ? (int64_t)g_comp->surfaces().size() : 0; }
+
+        int64_t vcn_surface_at(int64_t index)
+        {
+            if (!g_comp || index < 0)
+                return 0;
+            int64_t i = 0;
+            for (LSurface *s : g_comp->surfaces())
+            {
+                if (i == index)
+                    return H(s);
+                i++;
+            }
+            return 0;
+        }
+
+        int64_t vcn_surface_valid(int64_t h) { return surf(h) ? 1 : 0; }
+        int64_t vcn_surface_role(int64_t h) { LSurface *s = surf(h); return s ? (int64_t)s->roleId() : -1; }
+        int64_t vcn_surface_mapped(int64_t h) { LSurface *s = surf(h); return (s && s->mapped()) ? 1 : 0; }
+        int64_t vcn_surface_x(int64_t h) { LSurface *s = surf(h); return s ? (int64_t)s->pos().x() : 0; }
+        int64_t vcn_surface_y(int64_t h) { LSurface *s = surf(h); return s ? (int64_t)s->pos().y() : 0; }
+        int64_t vcn_surface_width(int64_t h) { LSurface *s = surf(h); return s ? (int64_t)s->size().width() : 0; }
+        int64_t vcn_surface_height(int64_t h) { LSurface *s = surf(h); return s ? (int64_t)s->size().height() : 0; }
+
+        void vcn_surface_set_pos(int64_t h, int64_t x, int64_t y)
+        {
+            LSurface *s = surf(h);
+            if (s)
+                s->setPos((Int32)x, (Int32)y);
+        }
+
+        void vcn_surface_raise(int64_t h)
+        {
+            LSurface *s = surf(h);
+            if (s)
+                s->raise();
+        }
+
+        int64_t vcn_surface_parent(int64_t h) { LSurface *s = surf(h); return s ? H(s->parent()) : 0; }
+
+        int64_t vcn_surface_at_point(double x, double y)
+        {
+            if (!g_comp)
+                return 0;
+            return H(g_comp->seat()->surfaceAt((Int32)x, (Int32)y));
+        }
+
+        int64_t vcn_surface_has_pointer_focus(int64_t h) { LSurface *s = surf(h); return (s && s->hasPointerFocus()) ? 1 : 0; }
+        int64_t vcn_surface_has_keyboard_focus(int64_t h) { LSurface *s = surf(h); return (s && s->hasKeyboardFocus()) ? 1 : 0; }
+
+        // ---- toplevel ----
+        int64_t vcn_toplevel_title_len(int64_t h) { LToplevelRole *t = top(h); return t ? str_len(t->title()) : 0; }
+        int64_t vcn_toplevel_title_char(int64_t h, int64_t i) { LToplevelRole *t = top(h); return t ? str_at(t->title(), i) : -1; }
+        int64_t vcn_toplevel_app_id_len(int64_t h) { LToplevelRole *t = top(h); return t ? str_len(t->appId()) : 0; }
+        int64_t vcn_toplevel_app_id_char(int64_t h, int64_t i) { LToplevelRole *t = top(h); return t ? str_at(t->appId(), i) : -1; }
+        int64_t vcn_toplevel_activated(int64_t h) { LToplevelRole *t = top(h); return (t && t->isActivated()) ? 1 : 0; }
+        int64_t vcn_toplevel_maximized(int64_t h) { LToplevelRole *t = top(h); return (t && t->isMaximized()) ? 1 : 0; }
+        int64_t vcn_toplevel_fullscreen(int64_t h) { LToplevelRole *t = top(h); return (t && t->isFullscreen()) ? 1 : 0; }
+        int64_t vcn_toplevel_minimized(int64_t h) { LToplevelRole *t = top(h); return (t && t->isMinimized()) ? 1 : 0; }
+
+        void vcn_toplevel_set_activated(int64_t h, int64_t flag)
+        {
+            LToplevelRole *t = top(h);
+            if (!t)
+                return;
+            auto st = t->pendingConfiguration().windowState;
+            if (flag)
+                st = st | CZWinActivated;
+            else
+                st = st & ~CZWinActivated;
+            t->configureState(st);
+        }
+
+        void vcn_toplevel_set_maximized(int64_t h, int64_t flag)
+        {
+            LToplevelRole *t = top(h);
+            if (!t)
+                return;
+            auto st = t->pendingConfiguration().windowState;
+            if (flag)
+                st = st | CZWinMaximized;
+            else
+                st = st & ~CZWinMaximized;
+            t->configureState(st);
+        }
+
+        void vcn_toplevel_set_fullscreen(int64_t h, int64_t flag)
+        {
+            LToplevelRole *t = top(h);
+            if (!t)
+                return;
+            auto st = t->pendingConfiguration().windowState;
+            if (flag)
+                st = st | CZWinFullscreen;
+            else
+                st = st & ~CZWinFullscreen;
+            t->configureState(st);
+        }
+
+        void vcn_toplevel_set_minimized(int64_t h, int64_t flag)
+        {
+            LToplevelRole *t = top(h);
+            if (t)
+                t->setMinimized(flag != 0);
+        }
+
+        void vcn_toplevel_configure_size(int64_t h, int64_t w, int64_t hh)
+        {
+            LToplevelRole *t = top(h);
+            if (t)
+                t->configureSize((Int32)w, (Int32)hh);
+        }
+
+        void vcn_toplevel_close(int64_t h)
+        {
+            LToplevelRole *t = top(h);
+            if (t)
+                t->close();
+        }
+
+        int64_t vcn_toplevel_window_x(int64_t h) { LToplevelRole *t = top(h); return t ? (int64_t)t->windowGeometry().x() : 0; }
+        int64_t vcn_toplevel_window_y(int64_t h) { LToplevelRole *t = top(h); return t ? (int64_t)t->windowGeometry().y() : 0; }
+        int64_t vcn_toplevel_window_width(int64_t h) { LToplevelRole *t = top(h); return t ? (int64_t)t->windowGeometry().width() : 0; }
+        int64_t vcn_toplevel_window_height(int64_t h) { LToplevelRole *t = top(h); return t ? (int64_t)t->windowGeometry().height() : 0; }
+
+        // ---- wyjscia ----
+        int64_t vcn_output_count(void) { return g_comp ? (int64_t)g_comp->outputs().size() : 0; }
+
+        int64_t vcn_output_at(int64_t index)
+        {
+            if (!g_comp || index < 0 || index >= (int64_t)g_comp->outputs().size())
+                return 0;
+            return H(g_comp->outputs().at((size_t)index));
+        }
+
+        int64_t vcn_output_name_len(int64_t h) { LOutput *o = outp(h); return o ? str_len(o->name()) : 0; }
+        int64_t vcn_output_name_char(int64_t h, int64_t i) { LOutput *o = outp(h); return o ? str_at(o->name(), i) : -1; }
+        int64_t vcn_output_x(int64_t h) { LOutput *o = outp(h); return o ? (int64_t)o->pos().x() : 0; }
+        int64_t vcn_output_y(int64_t h) { LOutput *o = outp(h); return o ? (int64_t)o->pos().y() : 0; }
+        int64_t vcn_output_width(int64_t h) { LOutput *o = outp(h); return o ? (int64_t)o->size().width() : 0; }
+        int64_t vcn_output_height(int64_t h) { LOutput *o = outp(h); return o ? (int64_t)o->size().height() : 0; }
+        double vcn_output_scale(int64_t h) { LOutput *o = outp(h); return o ? (double)o->scale() : 1.0; }
+
+        void vcn_output_set_scale(int64_t h, double scale)
+        {
+            LOutput *o = outp(h);
+            if (o)
+                o->setScale((Float32)scale);
+        }
+
+        void vcn_output_set_pos(int64_t h, int64_t x, int64_t y)
+        {
+            LOutput *o = outp(h);
+            if (o)
+                o->setPos(SkIPoint::Make((int32_t)x, (int32_t)y));
+        }
+
+        void vcn_output_repaint(int64_t h)
+        {
+            LOutput *o = outp(h);
+            if (o)
+                o->repaint();
+        }
+
+        int64_t vcn_output_vsync(int64_t h) { LOutput *o = outp(h); return (o && o->isVSyncEnabled()) ? 1 : 0; }
+
+        void vcn_output_set_vsync(int64_t h, int64_t flag)
+        {
+            LOutput *o = outp(h);
+            if (o)
+                o->enableVSync(flag != 0);
+        }
+
+        void vcn_repaint_all(void)
+        {
+            if (g_comp)
+                g_comp->repaintAllOutputs();
+        }
+
+        // ---- wskaznik, klawiatura, seat ----
+        double vcn_cursor_x(void) { return g_comp ? (double)g_comp->cursor()->pos().x() : 0.0; }
+        double vcn_cursor_y(void) { return g_comp ? (double)g_comp->cursor()->pos().y() : 0.0; }
+
+        void vcn_cursor_set_pos(double x, double y)
+        {
+            if (g_comp)
+                g_comp->cursor()->setPos((Float32)x, (Float32)y);
+        }
+
+        void vcn_cursor_set_visible(int64_t flag)
+        {
+            if (g_comp)
+                g_comp->cursor()->setVisible(flag != 0);
+        }
+
+        int64_t vcn_pointer_focus(void) { return g_comp ? H(g_comp->seat()->pointer()->focus()) : 0; }
+
+        void vcn_pointer_set_focus(int64_t h)
+        {
+            if (g_comp)
+                g_comp->seat()->pointer()->setFocus(h == 0 ? nullptr : surf(h));
+        }
+
+        int64_t vcn_keyboard_focus(void) { return g_comp ? H(g_comp->seat()->keyboard()->focus()) : 0; }
+
+        void vcn_keyboard_set_focus(int64_t h)
+        {
+            if (g_comp)
+                g_comp->seat()->keyboard()->setFocus(h == 0 ? nullptr : surf(h));
+        }
+
+        int64_t vcn_key_pressed(int64_t code)
+        {
+            return (g_comp && g_comp->seat()->keyboard()->isKeyCodePressed((UInt32)code)) ? 1 : 0;
+        }
+
+        int64_t vcn_active_toplevel(void)
+        {
+            if (!g_comp)
+                return 0;
+            LToplevelRole *t = g_comp->seat()->activeToplevel();
+            return t ? H(t->surface()) : 0;
+        }
+
+        int64_t vcn_seat_name_len(void)
+        {
+            return g_comp ? (int64_t)std::string(g_comp->seat()->name()).size() : 0;
+        }
+
+        int64_t vcn_seat_name_char(int64_t i)
+        {
+            return g_comp ? str_at(std::string(g_comp->seat()->name()), i) : -1;
+        }
+        }
+
+        extern "C" void volcan_shim_tail_unused()
+        {
+    ]
+    end 1
+]
