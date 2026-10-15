@@ -1,0 +1,209 @@
+fun str_len(s: Str) -> Int [
+    let n = 0
+    native {Rust} [
+        n = s.chars().count() as i64;
+    ]
+    end n
+]
+
+!! Podnapis od znaku `a` (wlacznie) do `b` (wylacznie), liczone w znakach; poza zakresem obcina.
+!! Uzywaj zamiast Str.slice dla wartosci, ktorych typu transpiler nie zna (np. elementow list).
+fun str_sub(s: Str, a: Int, b: Int) -> Str [
+    let out = ""
+    native {Rust} [
+        let start = if a < 0 { 0 } else { a as usize };
+        let end = if b < 0 { 0 } else { b as usize };
+        out = if end > start { s.chars().skip(start).take(end - start).collect::<String>() } else { String::new() };
+    ]
+    end out
+]
+
+fun str_at(s: Str, i: Int) -> Str [
+    end s.slice(i, i + 1)
+]
+
+fun str_lower(s: Str) -> Str [
+    let out = ""
+    native {Rust} [
+        out = s.to_lowercase();
+    ]
+    end out
+]
+
+fun str_trim(s: Str) -> Str [
+    let out = ""
+    native {Rust} [
+        out = s.trim().to_string();
+    ]
+    end out
+]
+
+!! Indeks pierwszego wystapienia znaku/napisu `needle` od pozycji `from` albo -1.
+fun str_find(s: Str, needle: Str, from: Int) -> Int [
+    let n = str_len(s)
+    let m = str_len(needle)
+    if m == 0 [
+        end -1
+    ]
+    let i = from
+    if i < 0 [
+        i = 0
+    ]
+    while i + m <= n [
+        if s.slice(i, i + m) == needle [
+            end i
+        ]
+        i = i + 1
+    ]
+    end -1
+]
+
+fun str_starts_with(s: Str, prefix: Str) -> Bool [
+    let m = str_len(prefix)
+    if m > str_len(s) [
+        end false
+    ]
+    end s.slice(0, m) == prefix
+]
+
+!! Dzieli napis separatorem (dowolny napis niepusty); puste kawalki sa zachowane.
+fun str_split(s: Str, sep: Str) -> List<Str> [
+    let out: List<Str> = []
+    let m = str_len(sep)
+    if m == 0 [
+        out.push(s)
+        end out
+    ]
+    let start = 0
+    let pos = str_find(s, sep, 0)
+    while pos >= 0 [
+        out.push(s.slice(start, pos))
+        start = pos + m
+        pos = str_find(s, sep, start)
+    ]
+    out.push(s.slice(start, str_len(s)))
+    end out
+]
+
+!! Slowa rozdzielone bialymi znakami (spacje i tabulatory); puste pomijane.
+fun str_words(s: Str) -> List<Str> [
+    let out: List<Str> = []
+    let n = str_len(s)
+    let i = 0
+    while i < n [
+        while i < n and (s.slice(i, i + 1) == " " or s.slice(i, i + 1) == "\t") [
+            i = i + 1
+        ]
+        let start = i
+        while i < n and s.slice(i, i + 1) != " " and s.slice(i, i + 1) != "\t" [
+            i = i + 1
+        ]
+        if i > start [
+            out.push(s.slice(start, i))
+        ]
+    ]
+    end out
+]
+
+!! Reszta linii zaczynajac od n-tego slowa (numeracja od 0), z zachowaniem odstepow w srodku.
+fun str_words_from(s: Str, n: Int) -> Str [
+    let len = str_len(s)
+    let i = 0
+    let idx = 0
+    while i < len [
+        while i < len and (s.slice(i, i + 1) == " " or s.slice(i, i + 1) == "\t") [
+            i = i + 1
+        ]
+        if i < len and idx == n [
+            end str_trim(s.slice(i, len))
+        ]
+        while i < len and s.slice(i, i + 1) != " " and s.slice(i, i + 1) != "\t" [
+            i = i + 1
+        ]
+        idx = idx + 1
+    ]
+    end ""
+]
+
+!! Zamienia kazde wystapienie jednego znaku na inny (np. zeby usunac separatory z danych).
+fun str_replace_char(s: Str, from: Str, to: Str) -> Str [
+    let out = ""
+    let n = str_len(s)
+    let i = 0
+    while i < n [
+        let c = s.slice(i, i + 1)
+        if c == from [
+            out = out + to
+        ] else [
+            out = out + c
+        ]
+        i = i + 1
+    ]
+    end out
+]
+
+!! Liczba z napisu cyfr (z opcjonalnym minusem) albo `fallback`.
+fun str_int(s: Str, fallback: Int) -> Int [
+    let t = str_trim(s)
+    let n = str_len(t)
+    if n == 0 or n > 12 [
+        end fallback
+    ]
+    let neg = false
+    let i = 0
+    if t.slice(0, 1) == "-" [
+        neg = true
+        i = 1
+        if n == 1 [
+            end fallback
+        ]
+    ]
+    let digits = "0123456789"
+    let v = 0
+    while i < n [
+        let d = str_find(digits, t.slice(i, i + 1), 0)
+        if d < 0 [
+            end fallback
+        ]
+        v = v * 10 + d
+        i = i + 1
+    ]
+    if neg [
+        end 0 - v
+    ]
+    end v
+]
+
+!! Dopasowanie wzorca z * (dowolny ciag) i ? (dowolny znak) do calego napisu; wielkosc liter ma znaczenie.
+fun glob_match(pat: Str, text: Str) -> Bool [
+    let pl = str_len(pat)
+    let tl = str_len(text)
+    let p = 0
+    let t = 0
+    let star = -1
+    let mark = 0
+    while t < tl [
+        let pc = ""
+        if p < pl [
+            pc = pat.slice(p, p + 1)
+        ]
+        if p < pl and pc != "*" and (pc == "?" or pc == text.slice(t, t + 1)) [
+            p = p + 1
+            t = t + 1
+        ] elif p < pl and pc == "*" [
+            star = p
+            mark = t
+            p = p + 1
+        ] elif star >= 0 [
+            p = star + 1
+            mark = mark + 1
+            t = mark
+        ] else [
+            end false
+        ]
+    ]
+    while p < pl and pat.slice(p, p + 1) == "*" [
+        p = p + 1
+    ]
+    end p == pl
+]
