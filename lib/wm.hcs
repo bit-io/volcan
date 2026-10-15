@@ -1,0 +1,1160 @@
+include <layout>
+include <surface>
+include <output>
+include <events>
+include <config>
+include <strings>
+include <rules>
+include <binds>
+include <keys>
+include <session>
+include <style>
+include <input>
+
+!! Zarzadca okien: przestrzenie robocze (globalne albo osobne na kazde wyjscie), okna kafelkowe /
+!! plywajace / zmaksymalizowane / pelnoekranowe / przyklejone, scratchpad, uklady (master-stack,
+!! kolumny, siatka, monocle, zakladki, stos) wybierane osobno dla kazdej przestrzeni, wiele wyjsc,
+!! fokus podazajacy za myszka, flaga pilnosci okna, reguly po app_id i tytule, polecenia tekstowe
+!! oraz zapis i odtworzenie stanu (state.hcs).
+!!
+!! Stan trzyma struktura Wm. Funkcje wm_* NIE zmieniaja argumentu - zwracaja nowy Wm
+!! (styl funkcyjny dziala tak samo w kazdym module i wersji hackerc, bo nie polega na
+!! automatycznym &mut miedzy plikami): `w = wm_add(w, h, WMODE_TILED)`.
+!!
+!! Wymaga trybu recznego: compositor_manual_policy(true) - inaczej Louvre sam obsluzy zadania
+!! (maksymalizacja, pelny ekran, zamkniecie) zanim zrobi to zarzadca.
+!!
+!!   let wm = wm_new()   (wm musi byc zmienna, ktorej przypisujesz wynik)
+!!   compositor_manual_policy(true)
+!!   ... w petli zdarzen:
+!!   wm = wm_handle(wm, ev)
+!!   if wm_needs_arrange(ev.kind) [ wm = wm_arrange(wm)  wm_apply_focus(wm) ]
+!!
+!! Paski kart ukladow zakladek i stosu rysuje kompozytor jako nakladki (style_enable(true)).
+
+const WM_WORKSPACES: Int = 9
+const WM_OUTPUTS_MAX: Int = 8
+!! Wartosc `ws` okna w scratchpadzie (ukryte).
+const WM_SCRATCH_WS: Int = 99
+const WM_OVERLAY_GROUP: Int = 1
+
+const WMODE_TILED: Int = 0
+const WMODE_FLOATING: Int = 1
+const WMODE_MAXIMIZED: Int = 2
+const WMODE_FULLSCREEN: Int = 3
+
+const WM_COLOR_TAB_ACTIVE: Int = 4283210495
+const WM_COLOR_TAB_INACTIVE: Int = 4282138440
+const WM_COLOR_TAB_TEXT: Int = 4293060326
+const WM_COLOR_URGENT: Int = 4293153611
+
+struct Wm [
+    handles: List<Int>,
+    ws: List<Int>,
+    mode: List<Int>,
+    outs: List<Int>,
+    hid: List<Int>,
+    sticky: List<Int>,
+    urgent: List<Int>,
+    scratch: List<Int>,
+    ruled: List<Int>,
+    wlayout: List<Int>,
+    wratio: List<Int>,
+    ocur: List<Int>,
+    current: Int,
+    gap: Int,
+    focus: Int,
+    cur_out: Int,
+    per_output: Int,
+    ffm: Int,
+    pend_app: List<Str>,
+    pend_title: List<Str>,
+    pend_ws: List<Int>,
+    pend_mode: List<Int>,
+    pend_out: List<Int>,
+    pend_sticky: List<Int>,
+    pend_used: List<Int>
+]
+
+fun wm_fill(n: Int, v: Int) -> List<Int> [
+    let out: List<Int> = []
+    let i = 0
+    while i < n [
+        out.push(v)
+        i = i + 1
+    ]
+    end out
+]
+
+fun wm_ldrop(a: List<Int>, idx: Int) -> List<Int> [
+    let out: List<Int> = []
+    let i = 0
+    while i < a.len() [
+        if i != idx [
+            out.push(a[i])
+        ]
+        i = i + 1
+    ]
+    end out
+]
+
+fun wm_lfront(a: List<Int>, idx: Int) -> List<Int> [
+    let out: List<Int> = [a[idx]]
+    let i = 0
+    while i < a.len() [
+        if i != idx [
+            out.push(a[i])
+        ]
+        i = i + 1
+    ]
+    end out
+]
+
+fun wm_new() -> Wm [
+    let a: List<Int> = []
+    let b: List<Int> = []
+    let c: List<Int> = []
+    let d: List<Int> = []
+    let e: List<Int> = []
+    let f: List<Int> = []
+    let g: List<Int> = []
+    let h: List<Int> = []
+    let i: List<Int> = []
+    let pa: List<Str> = []
+    let pt: List<Str> = []
+    let pw: List<Int> = []
+    let pm: List<Int> = []
+    let po: List<Int> = []
+    let ps: List<Int> = []
+    let pu: List<Int> = []
+    end Wm(a, b, c, d, e, f, g, h, i, wm_fill(WM_WORKSPACES, 0), wm_fill(WM_WORKSPACES, 550), wm_fill(WM_OUTPUTS_MAX, 0), 0, 8, 0, 0, 0, 0, pa, pt, pw, pm, po, ps, pu)
+]
+
+fun wm_index(w: Wm, h: Int) -> Int [
+    let i = 0
+    while i < w.handles.len() [
+        if w.handles[i] == h [
+            end i
+        ]
+        i = i + 1
+    ]
+    end -1
+]
+
+fun wm_has(w: Wm, h: Int) -> Bool [
+    end wm_index(w, h) >= 0
+]
+
+!! Przestrzen robocza widoczna na wyjsciu k (w trybie globalnym - biezaca).
+fun wm_ws_of(w: Wm, k: Int) -> Int [
+    if w.per_output == 1 and k >= 0 and k < w.ocur.len() [
+        end w.ocur[k]
+    ]
+    end w.current
+]
+
+!! Czy i-te okno jest teraz pokazywane (nie w scratchpadzie; przyklejone zawsze).
+fun wm_shown(w: Wm, i: Int) -> Bool [
+    if w.ws[i] == WM_SCRATCH_WS [
+        end false
+    ]
+    if w.sticky[i] == 1 [
+        end true
+    ]
+    end w.ws[i] == wm_ws_of(w, w.outs[i])
+]
+
+!! Uchwyty okien spelniajacych warunki na przestrzeni `ws`; -1 w `ws`, `out` albo `mode` oznacza "dowolne".
+fun wm_select(w: Wm, ws: Int, out: Int, mode: Int) -> List<Int> [
+    let res: List<Int> = []
+    let i = 0
+    while i < w.handles.len() [
+        let ok = true
+        if ws >= 0 and w.ws[i] != ws [
+            ok = false
+        ]
+        if out >= 0 and w.outs[i] != out [
+            ok = false
+        ]
+        if mode >= 0 and w.mode[i] != mode [
+            ok = false
+        ]
+        if ok [
+            res.push(w.handles[i])
+        ]
+        i = i + 1
+    ]
+    end res
+]
+
+!! Okna pokazywane teraz (na wszystkich wyjsciach).
+fun wm_visible(w: Wm) -> List<Int> [
+    let res: List<Int> = []
+    let i = 0
+    while i < w.handles.len() [
+        if wm_shown(w, i) [
+            res.push(w.handles[i])
+        ]
+        i = i + 1
+    ]
+    end res
+]
+
+!! Okna pokazywane na wyjsciu `out` w trybie `mode` (-1 = dowolne).
+fun wm_visible_on(w: Wm, out: Int, mode: Int) -> List<Int> [
+    let res: List<Int> = []
+    let i = 0
+    while i < w.handles.len() [
+        if wm_shown(w, i) and (out < 0 or w.outs[i] == out) and (mode < 0 or w.mode[i] == mode) [
+            res.push(w.handles[i])
+        ]
+        i = i + 1
+    ]
+    end res
+]
+
+!! Ustawia fokus na okno i zdejmuje z niego flage pilnosci.
+fun wm_with_focus(w: Wm, h: Int) -> Wm [
+    let r = w.clone()
+    r.focus = h
+    let idx = wm_index(w, h)
+    if idx >= 0 [
+        r.urgent[idx] = 0
+    ]
+    end r
+]
+
+!! Fokus na ostatnie pokazywane okno (albo 0).
+fun wm_refocus(w: Wm) -> Wm [
+    let vis = wm_visible(w)
+    if vis.len() > 0 [
+        end wm_with_focus(w, vis[vis.len() - 1])
+    ]
+    let r = w.clone()
+    r.focus = 0
+    end r
+]
+
+fun wm_add(w: Wm, h: Int, mode: Int) -> Wm [
+    let n = w.clone()
+    if wm_has(w, h) [
+        end n
+    ]
+    n.handles.push(h)
+    n.ws.push(w.current)
+    n.mode.push(mode)
+    n.outs.push(w.cur_out)
+    n.hid.push(0)
+    n.sticky.push(0)
+    n.urgent.push(0)
+    n.scratch.push(0)
+    n.ruled.push(0)
+    n.focus = h
+    end n
+]
+
+fun wm_remove(w: Wm, h: Int) -> Wm [
+    let idx = wm_index(w, h)
+    let n = w.clone()
+    if idx < 0 [
+        end n
+    ]
+    n.handles = wm_ldrop(w.handles, idx)
+    n.ws = wm_ldrop(w.ws, idx)
+    n.mode = wm_ldrop(w.mode, idx)
+    n.outs = wm_ldrop(w.outs, idx)
+    n.hid = wm_ldrop(w.hid, idx)
+    n.sticky = wm_ldrop(w.sticky, idx)
+    n.urgent = wm_ldrop(w.urgent, idx)
+    n.scratch = wm_ldrop(w.scratch, idx)
+    n.ruled = wm_ldrop(w.ruled, idx)
+    if w.focus == h [
+        end wm_refocus(n)
+    ]
+    end n
+]
+
+!! Przelacza na przestrzen roboczą n (0..WM_WORKSPACES-1); w trybie osobnych przestrzeni - na biezacym wyjsciu.
+fun wm_switch(w: Wm, n: Int) -> Wm [
+    let t = n
+    if t < 0 [
+        t = 0
+    ]
+    if t >= WM_WORKSPACES [
+        t = WM_WORKSPACES - 1
+    ]
+    let r = w.clone()
+    r.current = t
+    if w.per_output == 1 and w.cur_out >= 0 and w.cur_out < w.ocur.len() [
+        r.ocur[w.cur_out] = t
+    ]
+    end wm_refocus(r)
+]
+
+!! Przenosi okno na przestrzen n (okno znika, jesli n nie jest widoczna).
+fun wm_send(w: Wm, h: Int, n: Int) -> Wm [
+    let idx = wm_index(w, h)
+    let r = w.clone()
+    if idx < 0 or n < 0 or n >= WM_WORKSPACES [
+        end r
+    ]
+    r.ws[idx] = n
+    r.scratch[idx] = 0
+    if w.focus == h and not wm_shown(r, idx) [
+        end wm_refocus(r)
+    ]
+    end r
+]
+
+fun wm_set_mode(w: Wm, h: Int, mode: Int) -> Wm [
+    let idx = wm_index(w, h)
+    let r = w.clone()
+    if idx >= 0 [
+        r.mode[idx] = mode
+    ]
+    end r
+]
+
+fun wm_toggle_float(w: Wm, h: Int) -> Wm [
+    let idx = wm_index(w, h)
+    let r = w.clone()
+    if idx < 0 [
+        end r
+    ]
+    if w.mode[idx] == WMODE_TILED [
+        r.mode[idx] = WMODE_FLOATING
+    ] else [
+        r.mode[idx] = WMODE_TILED
+    ]
+    end r
+]
+
+!! Okno przyklejone jest widoczne na wszystkich przestrzeniach.
+fun wm_toggle_sticky(w: Wm, h: Int) -> Wm [
+    let idx = wm_index(w, h)
+    let r = w.clone()
+    if idx >= 0 [
+        if w.sticky[idx] == 1 [
+            r.sticky[idx] = 0
+        ] else [
+            r.sticky[idx] = 1
+        ]
+    ]
+    end r
+]
+
+!! Uklad i proporcja master dotycza przestrzeni roboczej, wiec kazda ma wlasne.
+fun wm_layout(w: Wm) -> Int [
+    end w.wlayout[w.current]
+]
+
+fun wm_ratio(w: Wm) -> Int [
+    end w.wratio[w.current]
+]
+
+fun wm_set_layout(w: Wm, kind: Int) -> Wm [
+    let r = w.clone()
+    if kind >= 0 and kind < LAYOUT_COUNT [
+        r.wlayout[w.current] = kind
+    ]
+    end r
+]
+
+fun wm_cycle_layout(w: Wm) -> Wm [
+    let r = w.clone()
+    r.wlayout[w.current] = (w.wlayout[w.current] + 1) % LAYOUT_COUNT
+    end r
+]
+
+fun wm_set_ratio(w: Wm, permille: Int) -> Wm [
+    let p = permille
+    if p < 200 [
+        p = 200
+    ]
+    if p > 800 [
+        p = 800
+    ]
+    let r = w.clone()
+    r.wratio[w.current] = p
+    end r
+]
+
+!! Zmienia szerokosc mastera o `delta` promili (ograniczone do 200..800).
+fun wm_adjust_ratio(w: Wm, delta: Int) -> Wm [
+    end wm_set_ratio(w, w.wratio[w.current] + delta)
+]
+
+fun wm_focus(w: Wm, h: Int) -> Wm [
+    let idx = wm_index(w, h)
+    if idx >= 0 and wm_shown(w, idx) [
+        end wm_with_focus(w, h)
+    ]
+    end w.clone()
+]
+
+!! Fokus o `step` okien dalej wsrod pokazywanych (cyklicznie).
+fun wm_focus_step(w: Wm, step: Int) -> Wm [
+    let vis = wm_visible(w)
+    let n = vis.len()
+    if n == 0 [
+        end w.clone()
+    ]
+    let pos = 0
+    let i = 0
+    while i < n [
+        if vis[i] == w.focus [
+            pos = i
+        ]
+        i = i + 1
+    ]
+    end wm_with_focus(w, vis[(pos + step + n) % n])
+]
+
+!! Przechodzi do pierwszego okna z flaga pilnosci (przelaczajac przestrzen, jesli trzeba).
+fun wm_focus_urgent(w: Wm) -> Wm [
+    let i = 0
+    while i < w.handles.len() [
+        if w.urgent[i] == 1 [
+            let h = w.handles[i]
+            let r = w.clone()
+            if not wm_shown(w, i) and w.ws[i] != WM_SCRATCH_WS [
+                r.cur_out = w.outs[i]
+                r = wm_switch(r, w.ws[i])
+            ]
+            end wm_with_focus(r, h)
+        ]
+        i = i + 1
+    ]
+    end w.clone()
+]
+
+!! Nastepne wyjscie (w trybie osobnych przestrzeni zmienia tez biezaca przestrzen).
+fun wm_cycle_output(w: Wm, count: Int) -> Wm [
+    let r = w.clone()
+    if count > 0 [
+        r.cur_out = (w.cur_out + 1) % count
+        if w.per_output == 1 and r.cur_out < w.ocur.len() [
+            r.current = w.ocur[r.cur_out]
+        ]
+    ]
+    end r
+]
+
+fun wm_send_output(w: Wm, h: Int, out: Int) -> Wm [
+    let idx = wm_index(w, h)
+    let r = w.clone()
+    if idx >= 0 and out >= 0 [
+        r.outs[idx] = out
+    ]
+    end r
+]
+
+!! Wlacza/wylacza osobne przestrzenie robocze na kazdym wyjsciu.
+fun wm_set_per_output(w: Wm, on: Bool) -> Wm [
+    let r = w.clone()
+    if on and w.per_output == 0 [
+        r.per_output = 1
+        r.ocur = wm_fill(WM_OUTPUTS_MAX, w.current)
+    ]
+    if not on and w.per_output == 1 [
+        r.per_output = 0
+        r.current = wm_ws_of(w, w.cur_out)
+    ]
+    end wm_refocus(r)
+]
+
+fun wm_set_follow_mouse(w: Wm, on: Bool) -> Wm [
+    let r = w.clone()
+    if on [
+        r.ffm = 1
+    ] else [
+        r.ffm = 0
+    ]
+    end r
+]
+
+!! Awansuje okno na pierwsze (master) miejsce.
+fun wm_promote(w: Wm, h: Int) -> Wm [
+    let idx = wm_index(w, h)
+    let r = w.clone()
+    if idx <= 0 [
+        end r
+    ]
+    r.handles = wm_lfront(w.handles, idx)
+    r.ws = wm_lfront(w.ws, idx)
+    r.mode = wm_lfront(w.mode, idx)
+    r.outs = wm_lfront(w.outs, idx)
+    r.hid = wm_lfront(w.hid, idx)
+    r.sticky = wm_lfront(w.sticky, idx)
+    r.urgent = wm_lfront(w.urgent, idx)
+    r.scratch = wm_lfront(w.scratch, idx)
+    r.ruled = wm_lfront(w.ruled, idx)
+    end r
+]
+
+!! Powierzchnia nadrzedna (idziemy w gore po rodzicach) - np. dla subpowierzchni i popupow pod kursorem.
+fun wm_root(h: Int) -> Int [
+    let cur = h
+    let guard = 0
+    while cur != 0 and surface_parent(cur) != 0 and guard < 32 [
+        cur = surface_parent(cur)
+        guard = guard + 1
+    ]
+    end cur
+]
+
+!! Ustawia rozmiar i pozycje okna z uwzglednieniem limitow min/max klienta i przesuniecia
+!! geometrii okna (np. cieni CSD).
+fun wm_place(h: Int, x: Int, y: Int, width: Int, height: Int) [
+    let wd = width
+    let ht = height
+    let minw = toplevel_min_width(h)
+    let maxw = toplevel_max_width(h)
+    let minh = toplevel_min_height(h)
+    let maxh = toplevel_max_height(h)
+    if minw > 0 and wd < minw [
+        wd = minw
+    ]
+    if maxw > 0 and wd > maxw [
+        wd = maxw
+    ]
+    if minh > 0 and ht < minh [
+        ht = minh
+    ]
+    if maxh > 0 and ht > maxh [
+        ht = maxh
+    ]
+    toplevel_resize(h, wd, ht)
+    surface_move(h, x - toplevel_window_x(h), y - toplevel_window_y(h))
+    end
+]
+
+!! Obszar uzytkowy wyjscia o numerze `index` (po odjeciu pasków layer-shell).
+fun wm_area(index: Int) -> Rect [
+    let outs = output_list()
+    if index < 0 or index >= outs.len() [
+        end Rect(0, 0, 0, 0)
+    ]
+    let o = outs[index]
+    end Rect(output_available_x(o), output_available_y(o), output_available_width(o), output_available_height(o))
+]
+
+!! Scratchpad: wysyla okno do ukrytej szuflady (okno plywajace).
+fun wm_scratch_send(w: Wm, h: Int) -> Wm [
+    let idx = wm_index(w, h)
+    let r = w.clone()
+    if idx < 0 [
+        end r
+    ]
+    r.ws[idx] = WM_SCRATCH_WS
+    r.mode[idx] = WMODE_FLOATING
+    r.scratch[idx] = 1
+    if w.focus == h [
+        end wm_refocus(r)
+    ]
+    end r
+]
+
+!! Scratchpad: pokazuje (na srodku biezacego wyjscia) albo chowa okno z szuflady.
+fun wm_scratch_toggle(w: Wm) -> Wm [
+    let i = 0
+    let found = -1
+    while i < w.handles.len() [
+        if w.scratch[i] == 1 and found < 0 [
+            found = i
+        ]
+        i = i + 1
+    ]
+    let r = w.clone()
+    if found < 0 [
+        end r
+    ]
+    let h = w.handles[found]
+    if w.ws[found] == WM_SCRATCH_WS [
+        r.ws[found] = w.current
+        r.outs[found] = w.cur_out
+        r.mode[found] = WMODE_FLOATING
+        let area = wm_area(w.cur_out)
+        if area.w > 0 [
+            let sw = area.w * 6 / 10
+            let sh = area.h * 6 / 10
+            wm_place(h, area.x + (area.w - sw) / 2, area.y + (area.h - sh) / 2, sw, sh)
+            surface_raise(h)
+        ]
+        end wm_with_focus(r, h)
+    ]
+    r.ws[found] = WM_SCRATCH_WS
+    if w.focus == h [
+        end wm_refocus(r)
+    ]
+    end r
+]
+
+!! Przy zmianie liczby wyjsc okna znikajacego wyjscia wracaja na wyjscie 0.
+fun wm_fix_outputs(w: Wm, count: Int) -> Wm [
+    let r = w.clone()
+    let i = 0
+    while i < w.outs.len() [
+        if w.outs[i] >= count [
+            r.outs[i] = 0
+        ]
+        i = i + 1
+    ]
+    if w.cur_out >= count [
+        r.cur_out = 0
+    ]
+    end r
+]
+
+!! Chowa okna niewidoczne (minimalizacja) i pokazuje okna widoczne.
+fun wm_apply_visibility(w: Wm) -> Wm [
+    let r = w.clone()
+    let i = 0
+    while i < w.handles.len() [
+        let h = w.handles[i]
+        let shown = wm_shown(w, i)
+        if not shown and w.hid[i] == 0 [
+            toplevel_set_minimized(h, true)
+            r.hid[i] = 1
+        ]
+        if shown and w.hid[i] == 1 [
+            toplevel_set_minimized(h, false)
+            r.hid[i] = 0
+        ]
+        i = i + 1
+    ]
+    end r
+]
+
+!! Pasek kart dla ukladu zakladek/stosu: tla, aktywna karta i tytuly jako nakladki grupy WM_OVERLAY_GROUP.
+fun wm_draw_tabs(w: Wm, kind: Int, tiled: List<Int>, area: Rect) [
+    let n = tiled.len()
+    let tabs = layout_tabs(kind, n, area)
+    let active = n - 1
+    let i = 0
+    while i < n [
+        if tiled[i] == w.focus [
+            active = i
+        ]
+        i = i + 1
+    ]
+    i = 0
+    while i < tabs.len() [
+        let t = tabs[i].clone()
+        let color = WM_COLOR_TAB_INACTIVE
+        if i == active [
+            color = WM_COLOR_TAB_ACTIVE
+        ]
+        overlay_rect_g(WM_OVERLAY_GROUP, t.x, t.y, t.w - 1, t.h - 1, color)
+        let title = toplevel_title(tiled[i])
+        let maxc = t.w / 7
+        if maxc < 1 [
+            maxc = 1
+        ]
+        if str_len(title) > maxc [
+            title = str_sub(title, 0, maxc)
+        ]
+        overlay_text(WM_OVERLAY_GROUP, t.x + 6, t.y + 16, 13, WM_COLOR_TAB_TEXT, title)
+        i = i + 1
+    ]
+    end
+]
+
+!! Rozklada okna na wszystkich wyjsciach wg ukladu przestrzeni widocznej na danym wyjsciu.
+fun wm_arrange(w0: Wm) -> Wm [
+    let outs = output_list()
+    let count = outs.len()
+    if count == 0 [
+        end w0.clone()
+    ]
+    let w = wm_apply_visibility(wm_fix_outputs(w0, count))
+    overlay_clear_group(WM_OVERLAY_GROUP)
+    let k = 0
+    while k < count [
+        let area = wm_area(k)
+        let ws_k = wm_ws_of(w, k)
+        let kind = w.wlayout[ws_k]
+        let tiled = wm_visible_on(w, k, WMODE_TILED)
+        let rects = layout_compute(kind, tiled.len(), area, w.gap, w.wratio[ws_k])
+        let i = 0
+        while i < tiled.len() [
+            let r = rects[i].clone()
+            wm_place(tiled[i], r.x, r.y, r.w, r.h)
+            i = i + 1
+        ]
+        if (kind == LAYOUT_TABBED or kind == LAYOUT_STACKED) and tiled.len() > 0 [
+            let act = tiled.len() - 1
+            i = 0
+            while i < tiled.len() [
+                if tiled[i] == w.focus [
+                    act = i
+                ]
+                i = i + 1
+            ]
+            surface_raise(tiled[act])
+            wm_draw_tabs(w, kind, tiled, area)
+        ]
+        let maxed = wm_visible_on(w, k, WMODE_MAXIMIZED)
+        i = 0
+        while i < maxed.len() [
+            wm_place(maxed[i], area.x, area.y, area.w, area.h)
+            i = i + 1
+        ]
+        let full = wm_visible_on(w, k, WMODE_FULLSCREEN)
+        i = 0
+        while i < full.len() [
+            let o = outs[k]
+            wm_place(full[i], output_x(o), output_y(o), output_width(o), output_height(o))
+            surface_raise(full[i])
+            i = i + 1
+        ]
+        k = k + 1
+    ]
+    end w
+]
+
+!! Przenosi aktywnosc i fokus klawiatury na okno w.focus; okna pilne dostaja wlasny kolor ramki.
+fun wm_apply_focus(w: Wm) [
+    let i = 0
+    while i < w.handles.len() [
+        window_set_border(w.handles[i], WM_COLOR_URGENT, w.urgent[i] == 1)
+        i = i + 1
+    ]
+    if w.focus != 0 [
+        toplevel_focus(w.focus)
+    ]
+    end
+]
+
+!! Fokus podazajacy za myszka: wolaj przy ruchu kursora (gdy nie trwa przeciaganie).
+fun wm_pointer_focus(w: Wm) -> Wm [
+    if w.ffm == 0 [
+        end w.clone()
+    ]
+    let under = wm_root(surface_under_cursor())
+    let idx = wm_index(w, under)
+    if under == 0 or under == w.focus or idx < 0 [
+        end w.clone()
+    ]
+    if wm_shown(w, idx) [
+        end wm_with_focus(w, under)
+    ]
+    end w.clone()
+]
+
+!! Czy zdarzenie tego rodzaju wymaga ponownego rozlozenia okien.
+fun wm_needs_arrange(kind: Int) -> Bool [
+    end kind == EV_SURFACE_MAPPED or kind == EV_SURFACE_UNMAPPED or kind == EV_SURFACE_DESTROYED or kind == EV_FULLSCREEN_REQUEST or kind == EV_UNFULLSCREEN_REQUEST or kind == EV_MAXIMIZE_REQUEST or kind == EV_UNMAXIMIZE_REQUEST or kind == EV_OUTPUT_PLUGGED or kind == EV_OUTPUT_UNPLUGGED or kind == EV_TOPLEVEL_TITLE or kind == EV_TOPLEVEL_APP_ID or kind == EV_ACTIVATE_REQUEST
+]
+
+!! Po zdjeciu maksymalizacji/pelnego ekranu okno wraca do trybu wynikajacego z regul (plywajace dla
+!! dialogow i regul float, inaczej kafelek) - wczesniejszy tryb reczny nie jest pamietany.
+fun wm_restore_mode(w: Wm, h: Int) -> Wm [
+    let act = rules_match(toplevel_app_id(h), toplevel_title(h))
+    if act.floating == 1 or surface_parent(h) != 0 [
+        end wm_set_mode(w, h, WMODE_FLOATING)
+    ]
+    end wm_set_mode(w, h, WMODE_TILED)
+]
+
+!! Stosuje wynik reguly (rules.hcs) do okna.
+fun wm_apply_rule(w: Wm, h: Int, act: RuleAct) -> Wm [
+    let idx = wm_index(w, h)
+    let r = w.clone()
+    if idx < 0 [
+        end r
+    ]
+    if act.floating == 1 [
+        r.mode[idx] = WMODE_FLOATING
+    ]
+    if act.floating == 0 [
+        r.mode[idx] = WMODE_TILED
+    ]
+    if act.ws >= 0 [
+        r.ws[idx] = act.ws
+    ]
+    if act.out >= 0 [
+        r.outs[idx] = act.out
+    ]
+    if act.sticky == 1 [
+        r.sticky[idx] = 1
+    ]
+    if act.maximize == 1 [
+        r.mode[idx] = WMODE_MAXIMIZED
+        toplevel_set_maximized(h, true)
+    ]
+    if act.fullscreen == 1 [
+        r.mode[idx] = WMODE_FULLSCREEN
+        toplevel_set_fullscreen(h, true)
+    ]
+    if act.scratch == 1 [
+        r.ws[idx] = WM_SCRATCH_WS
+        r.mode[idx] = WMODE_FLOATING
+        r.scratch[idx] = 1
+    ]
+    if w.focus == h and not wm_shown(r, idx) [
+        end wm_refocus(r)
+    ]
+    end r
+]
+
+!! Zapisany stan (state.hcs): pasuje po app_id (i tytule, jesli pasuje), kazdy wpis raz.
+fun wm_apply_pending(w: Wm, h: Int, app: Str, title: Str) -> Wm [
+    let idx = wm_index(w, h)
+    let r = w.clone()
+    if idx < 0 or app == "" [
+        end r
+    ]
+    let found = -1
+    let j = 0
+    while j < w.pend_app.len() [
+        if w.pend_used[j] == 0 and w.pend_app[j] == app [
+            if w.pend_title[j] == title [
+                if found < 0 or w.pend_title[found] != title [
+                    found = j
+                ]
+            ] elif found < 0 [
+                found = j
+            ]
+        ]
+        j = j + 1
+    ]
+    if found < 0 [
+        end r
+    ]
+    r.pend_used[found] = 1
+    r.ws[idx] = w.pend_ws[found]
+    r.mode[idx] = w.pend_mode[found]
+    r.outs[idx] = w.pend_out[found]
+    r.sticky[idx] = w.pend_sticky[found]
+    if w.pend_ws[found] == WM_SCRATCH_WS [
+        r.scratch[idx] = 1
+    ]
+    end r
+]
+
+!! Klasyfikacja okna: reguly z konfiguracji, potem zapisany stan. Powtarzana raz, gdy app_id
+!! pojawi sie po mapowaniu (ruled = 1: sklasyfikowane bez app_id, 2: ostatecznie).
+fun wm_classify(w: Wm, h: Int) -> Wm [
+    let idx = wm_index(w, h)
+    let r = w.clone()
+    if idx < 0 or w.ruled[idx] >= 2 [
+        end r
+    ]
+    let app = toplevel_app_id(h)
+    let title = toplevel_title(h)
+    let act = rules_match(app, title)
+    if surface_parent(h) != 0 and act.floating < 0 [
+        act.floating = 1
+        act.matched = true
+    ]
+    if act.matched [
+        r = wm_apply_rule(r, h, act)
+    ]
+    r = wm_apply_pending(r, h, app, title)
+    if app == "" [
+        r.ruled[idx] = 1
+    ] else [
+        r.ruled[idx] = 2
+    ]
+    end r
+]
+
+!! Obsluga zdarzenia Louvre (tryb reczny); zwraca nowy stan. Nie rozklada okien - zrob to wm_arrange.
+fun wm_handle(w: Wm, ev: Event) -> Wm [
+    let kind = ev.kind
+    let a = ev.a
+    let r = w.clone()
+    if kind == EV_SURFACE_MAPPED [
+        if surface_role(a) == ROLE_TOPLEVEL [
+            r = wm_add(r, a, WMODE_TILED)
+            r = wm_classify(r, a)
+        ]
+    ]
+    if kind == EV_TOPLEVEL_APP_ID or kind == EV_TOPLEVEL_TITLE [
+        r = wm_classify(r, a)
+    ]
+    if kind == EV_SURFACE_UNMAPPED or kind == EV_SURFACE_DESTROYED [
+        r = wm_remove(r, a)
+    ]
+    if kind == EV_FULLSCREEN_REQUEST and wm_has(r, a) [
+        r = wm_set_mode(r, a, WMODE_FULLSCREEN)
+        toplevel_set_fullscreen(a, true)
+    ]
+    if kind == EV_UNFULLSCREEN_REQUEST and wm_has(r, a) [
+        r = wm_restore_mode(r, a)
+        toplevel_set_fullscreen(a, false)
+    ]
+    if kind == EV_MAXIMIZE_REQUEST and wm_has(r, a) [
+        r = wm_set_mode(r, a, WMODE_MAXIMIZED)
+        toplevel_set_maximized(a, true)
+    ]
+    if kind == EV_UNMAXIMIZE_REQUEST and wm_has(r, a) [
+        r = wm_restore_mode(r, a)
+        toplevel_set_maximized(a, false)
+    ]
+    if kind == EV_MINIMIZE_REQUEST [
+        toplevel_set_minimized(a, true)
+    ]
+    if kind == EV_UNMINIMIZE_REQUEST [
+        toplevel_set_minimized(a, false)
+    ]
+    if kind == EV_CLOSE_REQUEST [
+        toplevel_close(a)
+    ]
+    if kind == EV_ACTIVATE_REQUEST [
+        let idx = wm_index(r, a)
+        if idx >= 0 and a != r.focus [
+            r.urgent[idx] = 1
+        ]
+    ]
+    if kind == EV_ACTIVE_TOPLEVEL and a != 0 and wm_has(r, a) [
+        r = wm_with_focus(r, a)
+    ]
+    end r
+]
+
+!! Liczba z napisu cyfr (bez znaku) albo -1.
+fun wm_parse_int(s: Str) -> Int [
+    if str_len(s) == 0 or str_len(s) > 9 [
+        end -1
+    ]
+    let v = str_int(s, -1)
+    if v < 0 [
+        end -1
+    ]
+    end v
+]
+
+fun wm_mode_name(mode: Int) -> Str [
+    if mode == WMODE_FLOATING [
+        end "floating"
+    ]
+    if mode == WMODE_MAXIMIZED [
+        end "maximized"
+    ]
+    if mode == WMODE_FULLSCREEN [
+        end "fullscreen"
+    ]
+    end "tiled"
+]
+
+!! Lista okien (dla paskow zadan i IPC): jedna linia na okno:
+!! `uchwyt przestrzen tryb wyjscie flagi app_id<TAB>tytul`; flagi: f fokus, s przyklejone,
+!! u pilne, h ukryte (inna przestrzen), p scratchpad, albo `-`.
+fun wm_list(w: Wm) -> Str [
+    let out = ""
+    let i = 0
+    while i < w.handles.len() [
+        let h = w.handles[i]
+        let flags = ""
+        if h == w.focus [
+            flags = flags + "f"
+        ]
+        if w.sticky[i] == 1 [
+            flags = flags + "s"
+        ]
+        if w.urgent[i] == 1 [
+            flags = flags + "u"
+        ]
+        if not wm_shown(w, i) [
+            flags = flags + "h"
+        ]
+        if w.scratch[i] == 1 [
+            flags = flags + "p"
+        ]
+        if flags == "" [
+            flags = "-"
+        ]
+        let ws_text = "scratch"
+        if w.ws[i] != WM_SCRATCH_WS [
+            ws_text = ((w.ws[i] + 1) as Str)
+        ]
+        let line = (h as Str) + " " + ws_text + " " + wm_mode_name(w.mode[i]) + " " + ((w.outs[i] + 1) as Str) + " " + flags + " " + toplevel_app_id(h) + "\t" + toplevel_title(h)
+        if out == "" [
+            out = line
+        ] else [
+            out = out + "\n" + line
+        ]
+        i = i + 1
+    ]
+    end out
+]
+
+!! Wynik polecenia: nowy stan i tekst odpowiedzi.
+struct WmResult [
+    wm: Wm,
+    reply: Str
+]
+
+fun wm_ok(w: Wm) -> WmResult [
+    end WmResult(w.clone(), "ok")
+]
+
+fun wm_err(w: Wm, msg: Str) -> WmResult [
+    end WmResult(w.clone(), "error: " + msg)
+]
+
+!! Wykonuje polecenie tekstowe (np. z IPC lub skrotu). Po poleceniu wywolaj wm_arrange i wm_apply_focus.
+!! Polecenia: workspace N (1..9), send N, layout master|columns|grid|monocle|tabbed|stacked|next, float,
+!! sticky, focus next|prev|urgent, urgent, promote, ratio N (promile)|up|down, gap N, output next, close,
+!! scratchpad, scratch send, per-output on|off, follow-mouse on|off, spawn PROGRAM..., key NAZWA,
+!! windows, status.
+fun wm_command(w: Wm, line: Str, output_count: Int) -> WmResult [
+    let words = str_words(line)
+    if words.len() == 0 [
+        end wm_err(w, "puste polecenie")
+    ]
+    let cmd = str_lower(words[0].clone())
+    let arg = ""
+    if words.len() > 1 [
+        arg = words[1].clone()
+    ]
+    if cmd == "workspace" [
+        let n = wm_parse_int(arg)
+        if n < 1 or n > WM_WORKSPACES [
+            end wm_err(w, "workspace 1..9")
+        ]
+        end wm_ok(wm_switch(w, n - 1))
+    ]
+    if cmd == "send" [
+        let n = wm_parse_int(arg)
+        if n < 1 or n > WM_WORKSPACES [
+            end wm_err(w, "send 1..9")
+        ]
+        end wm_ok(wm_send(w, w.focus, n - 1))
+    ]
+    if cmd == "layout" [
+        if arg == "next" [
+            end wm_ok(wm_cycle_layout(w))
+        ]
+        if arg == "master" [
+            end wm_ok(wm_set_layout(w, LAYOUT_MASTER_STACK))
+        ]
+        if arg == "columns" [
+            end wm_ok(wm_set_layout(w, LAYOUT_COLUMNS))
+        ]
+        if arg == "grid" [
+            end wm_ok(wm_set_layout(w, LAYOUT_GRID))
+        ]
+        if arg == "monocle" [
+            end wm_ok(wm_set_layout(w, LAYOUT_MONOCLE))
+        ]
+        if arg == "tabbed" [
+            end wm_ok(wm_set_layout(w, LAYOUT_TABBED))
+        ]
+        if arg == "stacked" [
+            end wm_ok(wm_set_layout(w, LAYOUT_STACKED))
+        ]
+        end wm_err(w, "layout master|columns|grid|monocle|tabbed|stacked|next")
+    ]
+    if cmd == "float" [
+        end wm_ok(wm_toggle_float(w, w.focus))
+    ]
+    if cmd == "sticky" [
+        end wm_ok(wm_toggle_sticky(w, w.focus))
+    ]
+    if cmd == "urgent" [
+        end wm_ok(wm_focus_urgent(w))
+    ]
+    if cmd == "focus" [
+        if arg == "next" [
+            end wm_ok(wm_focus_step(w, 1))
+        ]
+        if arg == "prev" [
+            end wm_ok(wm_focus_step(w, -1))
+        ]
+        if arg == "urgent" [
+            end wm_ok(wm_focus_urgent(w))
+        ]
+        end wm_err(w, "focus next|prev|urgent")
+    ]
+    if cmd == "promote" [
+        end wm_ok(wm_promote(w, w.focus))
+    ]
+    if cmd == "ratio" [
+        if arg == "up" [
+            end wm_ok(wm_adjust_ratio(w, 50))
+        ]
+        if arg == "down" [
+            end wm_ok(wm_adjust_ratio(w, -50))
+        ]
+        let p = wm_parse_int(arg)
+        if p < 200 or p > 800 [
+            end wm_err(w, "ratio 200..800|up|down")
+        ]
+        end wm_ok(wm_set_ratio(w, p))
+    ]
+    if cmd == "gap" [
+        let g = wm_parse_int(arg)
+        if g < 0 or g > 200 [
+            end wm_err(w, "gap 0..200")
+        ]
+        let r = w.clone()
+        r.gap = g
+        end wm_ok(r)
+    ]
+    if cmd == "output" [
+        end wm_ok(wm_cycle_output(w, output_count))
+    ]
+    if cmd == "close" [
+        if w.focus != 0 [
+            toplevel_close(w.focus)
+        ]
+        end wm_ok(w)
+    ]
+    if cmd == "scratchpad" [
+        end wm_ok(wm_scratch_toggle(w))
+    ]
+    if cmd == "scratch" [
+        if arg == "send" [
+            end wm_ok(wm_scratch_send(w, w.focus))
+        ]
+        end wm_err(w, "scratch send")
+    ]
+    if cmd == "per-output" [
+        if arg == "on" [
+            end wm_ok(wm_set_per_output(w, true))
+        ]
+        if arg == "off" [
+            end wm_ok(wm_set_per_output(w, false))
+        ]
+        end wm_err(w, "per-output on|off")
+    ]
+    if cmd == "follow-mouse" [
+        if arg == "on" [
+            end wm_ok(wm_set_follow_mouse(w, true))
+        ]
+        if arg == "off" [
+            end wm_ok(wm_set_follow_mouse(w, false))
+        ]
+        end wm_err(w, "follow-mouse on|off")
+    ]
+    if cmd == "spawn" [
+        let program = str_words_from(line, 1)
+        if program == "" [
+            end wm_err(w, "spawn PROGRAM")
+        ]
+        if not spawn_program(program) [
+            end wm_err(w, "nie mozna uruchomic programu")
+        ]
+        end wm_ok(w)
+    ]
+    if cmd == "key" [
+        let code = key_code(arg)
+        if code < 0 [
+            end wm_err(w, "nieznany klawisz")
+        ]
+        keyboard_tap(code)
+        end wm_ok(w)
+    ]
+    if cmd == "windows" [
+        end WmResult(w.clone(), wm_list(w))
+    ]
+    if cmd == "status" [
+        let vis = wm_visible(w)
+        let text = "workspace=" + ((w.current + 1) as Str) + " layout=" + (wm_layout(w) as Str) + " windows=" + (vis.len() as Str) + " ratio=" + (wm_ratio(w) as Str) + " gap=" + (w.gap as Str)
+        end WmResult(w.clone(), text)
+    ]
+    end wm_err(w, "nieznane polecenie")
+]
