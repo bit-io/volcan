@@ -1,0 +1,30 @@
+include <ffi>
+include <ffi_ext>
+include <text>
+
+!! Zapis i odczyt plikow tekstowych (np. stan zarzadcy okien).
+
+!! Zapis atomowy (plik tymczasowy + rename).
+fun file_write(path: Str, data: Str) -> Bool [
+    ffi_buf_clear(0)
+    ffi_buf_clear(1)
+    text_push(0, path)
+    text_push(1, data)
+    end ffi_file_write() == 1
+]
+
+struct FileData [
+    ok: Bool,
+    data: Str
+]
+
+!! Czyta plik (do 4 MiB). ok = false, gdy nie da sie go otworzyc.
+fun file_read(path: Str) -> FileData [
+    ffi_buf_clear(0)
+    text_push(0, path)
+    let n = ffi_file_read()
+    if n < 0 [
+        end FileData(false, "")
+    ]
+    end FileData(true, text_read(4, 0))
+]
