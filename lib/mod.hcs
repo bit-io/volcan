@@ -1,10 +1,30 @@
 include <ffi>
+include <ffi_ext>
 include <text>
 include <events>
 include <compositor>   !! dociaga tez shim i link
 include <surface>
 include <output>
 include <input>
+include <keys>
+include <layout>
+include <grab>
+include <strings>
+include <config>
+include <files>
+include <process>
+include <xwayland>
+include <cursor>
+include <rules>
+include <binds>
+include <checked>
+include <ipc>
+include <style>
+include <popup>
+include <layer>
+include <session>
+include <wm>
+include <state>
 
 !! Wersja biblioteki volcan.
 const VOLCAN_VERSION: Str = "0.1.0"
