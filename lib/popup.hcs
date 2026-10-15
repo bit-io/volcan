@@ -1,0 +1,31 @@
+include <ffi>
+include <ffi_ext>
+include <layout>
+include <surface>
+
+!! Popupy (xdg_popup: menu, podpowiedzi). Domyslnie Louvre sam je pozycjonuje i
+!! obsluguje grab; w trybie recznym reaguj na EV_POPUP_CONFIGURE / EV_POPUP_GRAB.
+
+fun popup_dismiss(h: Int) [
+    ffi_popup_dismiss(h)
+    end
+]
+
+fun popup_is_topmost(h: Int) -> Bool [
+    end ffi_popup_is_topmost(h) == 1
+]
+
+!! Pozycja (rola) i rozmiar geometrii okna popupa.
+fun popup_rect(h: Int) -> Rect [
+    end Rect(ffi_popup_x(h), ffi_popup_y(h), ffi_popup_width(h), ffi_popup_height(h))
+]
+
+fun popup_configure(h: Int, r: Rect) [
+    ffi_popup_configure_rect(h, r.x, r.y, r.w, r.h)
+    end
+]
+
+!! Czy powierzchnia jest popupem.
+fun is_popup(h: Int) -> Bool [
+    end surface_role(h) == ROLE_POPUP
+]
