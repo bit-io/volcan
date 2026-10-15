@@ -1,0 +1,77 @@
+include <ffi>
+include <ffi_ext>
+include <text>
+include <surface>
+
+!! Layer-shell: paski, tapety, powiadomienia, nakladki. Obszar zajety przez strefy
+!! wylaczne jest juz odjety w output_available_* - uklad okien trzyma sie tego obszaru.
+
+const LAYER_BACKGROUND: Int = 0
+const LAYER_BOTTOM: Int = 1
+const LAYER_TOP: Int = 3
+const LAYER_OVERLAY: Int = 4
+
+!! Kotwice jak EDGE_*: 1 gora, 2 dol, 4 lewa, 8 prawa.
+const ANCHOR_TOP: Int = 1
+const ANCHOR_BOTTOM: Int = 2
+const ANCHOR_LEFT: Int = 4
+const ANCHOR_RIGHT: Int = 8
+
+const INTERACTIVITY_NONE: Int = 0
+const INTERACTIVITY_EXCLUSIVE: Int = 1
+const INTERACTIVITY_ON_DEMAND: Int = 2
+
+struct LayerInfo [
+    handle: Int,
+    layer: Int,
+    anchor: Int,
+    exclusive_zone: Int,
+    margin_top: Int,
+    margin_right: Int,
+    margin_bottom: Int,
+    margin_left: Int,
+    interactivity: Int,
+    width: Int,
+    height: Int
+]
+
+fun is_layer(h: Int) -> Bool [
+    end surface_role(h) == ROLE_LAYER
+]
+
+fun layer_info(h: Int) -> LayerInfo [
+    end LayerInfo(h, ffi_layer_layer(h), ffi_layer_anchor(h), ffi_layer_exclusive_zone(h), ffi_layer_margin_top(h), ffi_layer_margin_right(h), ffi_layer_margin_bottom(h), ffi_layer_margin_left(h), ffi_layer_interactivity(h), ffi_layer_width(h), ffi_layer_height(h))
+]
+
+!! Nazwa ("scope") nadana przez klienta, np. "panel", "wallpaper".
+fun layer_scope(h: Int) -> Str [
+    ffi_layer_scope(h)
+    end text_read(4, 0)
+]
+
+!! Uchwyty wszystkich powierzchni layer-shell (opcjonalnie tylko z danej warstwy, -1 = wszystkie).
+fun layer_list(layer: Int) -> List<Int> [
+    let out: List<Int> = []
+    let all = surface_list()
+    let i = 0
+    while i < all.len() [
+        let h = all[i]
+        if surface_role(h) == ROLE_LAYER [
+            if layer < 0 or ffi_layer_layer(h) == layer [
+                out.push(h)
+            ]
+        ]
+        i = i + 1
+    ]
+    end out
+]
+
+fun layer_close(h: Int) [
+    ffi_layer_close(h)
+    end
+]
+
+fun layer_configure_size(h: Int, width: Int, height: Int) [
+    ffi_layer_configure_size(h, width, height)
+    end
+]
