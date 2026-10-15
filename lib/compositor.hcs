@@ -1,6 +1,7 @@
 include <shim>
 include <link>
 include <ffi>
+include <ffi_ext>
 include <text>
 
 !! Stany kompozytora (LCompositor::CompositorState).
@@ -126,4 +127,26 @@ fun compositor_run() -> Int [
         ffi_dispatch(-1)
     ]
     end 0
+]
+
+!! Tresc ostatniego bledu shima (np. gdy compositor_create/compositor_start zwrocilo false).
+fun compositor_last_error() -> Str [
+    ffi_last_error()
+    end text_read(4, 0)
+]
+
+!! Maska funkcji wkompilowanych w shim (1 popupy, 2 layer-shell, 4 dotyk, 8 gesty, 16 schowek,
+!! 32 DND, 64 blokada sesji, 128 rysowanie, 256 gamma, 512 IPC, 1024 konfiguracja, 2048 xkb).
+fun compositor_features() -> Int [
+    end ffi_features()
+]
+
+!! Czy shim jest zgodny z wersja ABI, ktorej oczekuje kod.
+fun volcan_compatible(required: Int) -> Bool [
+    end ffi_abi_compatible(required) == 1
+]
+
+!! Ile zdarzen odrzucono z powodu przepelnienia kolejki (8192) - powinno byc 0.
+fun compositor_dropped_events() -> Int [
+    end ffi_dropped_events()
 ]
