@@ -1,4 +1,5 @@
 include <ffi>
+include <ffi_ext>
 include <text>
 
 const ROLE_NONE: Int = 0
@@ -218,4 +219,44 @@ fun surface_info(h: Int) -> SurfaceInfo [
         app_id = text_read(1, h)
     ]
     end SurfaceInfo(h, role, ffi_surface_mapped(h) == 1, ffi_surface_x(h), ffi_surface_y(h), ffi_surface_width(h), ffi_surface_height(h), title, app_id)
+]
+
+!! Tryby dekoracji okna.
+const DECORATION_CLIENT: Int = 0
+const DECORATION_SERVER: Int = 1
+
+!! Sugestia rozmiaru maksymalnego, jaki klient moze zajac (np. obszar uzytkowy).
+fun toplevel_set_bounds(h: Int, width: Int, height: Int) [
+    ffi_toplevel_configure_bounds(h, width, height)
+    end
+]
+
+fun toplevel_min_width(h: Int) -> Int [
+    end ffi_toplevel_min_width(h)
+]
+
+fun toplevel_min_height(h: Int) -> Int [
+    end ffi_toplevel_min_height(h)
+]
+
+!! 0 oznacza brak limitu.
+fun toplevel_max_width(h: Int) -> Int [
+    end ffi_toplevel_max_width(h)
+]
+
+fun toplevel_max_height(h: Int) -> Int [
+    end ffi_toplevel_max_height(h)
+]
+
+fun toplevel_supports_ssd(h: Int) -> Bool [
+    end ffi_toplevel_supports_ssd(h) == 1
+]
+
+fun toplevel_decoration(h: Int) -> Int [
+    end ffi_toplevel_decoration(h)
+]
+
+fun toplevel_set_decoration(h: Int, mode: Int) [
+    ffi_toplevel_set_decoration(h, mode)
+    end
 ]
