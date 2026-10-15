@@ -1,0 +1,87 @@
+include <ffi>
+include <ffi_ext>
+include <text>
+
+!! Prosta konfiguracja: plik `klucz = wartosc`, komentarze `#` lub `;`, sekcje `[nazwa]`
+!! dajace klucze `nazwa.klucz`. Cos jak:
+!!   terminal = foot
+!!   [tiling]
+!!   gap = 8
+!!   float_apps = pavucontrol, nm-connection-editor
+
+!! Wczytuje plik; zwraca liczbe kluczy albo -1, gdy pliku nie da sie otworzyc.
+fun config_load(path: Str) -> Int [
+    ffi_buf_clear(0)
+    text_push(0, path)
+    end ffi_config_load()
+]
+
+fun config_has(key: Str) -> Bool [
+    ffi_buf_clear(0)
+    text_push(0, key)
+    end ffi_config_lookup() == 1
+]
+
+fun config_get(key: Str, fallback: Str) -> Str [
+    ffi_buf_clear(0)
+    text_push(0, key)
+    if ffi_config_lookup() == 1 [
+        end text_read(4, 0)
+    ]
+    end fallback
+]
+
+!! Liczba calkowita; gdy brak klucza albo wartosc nie jest liczba - `fallback`.
+fun config_int(key: Str, fallback: Int) -> Int [
+    ffi_buf_clear(0)
+    text_push(0, key)
+    end ffi_config_lookup_int(fallback)
+]
+
+fun config_bool(key: Str, fallback: Bool) -> Bool [
+    if not config_has(key) [
+        end fallback
+    ]
+    let v = config_get(key, "")
+    end v == "1" or v == "true" or v == "yes" or v == "on"
+]
+
+fun config_set(key: Str, value: Str) [
+    ffi_buf_clear(0)
+    text_push(0, key)
+    ffi_buf_clear(1)
+    text_push(1, value)
+    ffi_config_store()
+    end
+]
+
+fun config_clear() [
+    ffi_config_clear()
+    end
+]
+
+!! Czy wartosc klucza (lista rozdzielona przecinkami) zawiera `item` (bez spacji po brzegach).
+fun config_list_has(key: Str, item: Str) -> Bool [
+    let s = config_get(key, "")
+    let n = s.len()
+    let start = 0
+    let i = 0
+    while i <= n [
+        if i == n or s.slice(i, i + 1) == "," [
+            let a = start
+            let b = i
+            while a < b and s.slice(a, a + 1) == " " [
+                a = a + 1
+            ]
+            while b > a and s.slice(b - 1, b) == " " [
+                b = b - 1
+            ]
+            if b > a and s.slice(a, b) == item [
+                end true
+            ]
+            start = i + 1
+        ]
+        i = i + 1
+    ]
+    end false
+]
