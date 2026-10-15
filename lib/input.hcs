@@ -1,4 +1,5 @@
 include <ffi>
+include <ffi_ext>
 include <text>
 
 !! Przyciski myszy (linux/input-event-codes.h).
@@ -79,4 +80,13 @@ fun active_toplevel() -> Int [
 
 fun seat_name() -> Str [
     end text_read(3, 0)
+]
+
+!! Kursor jako liczby calkowite (obciete do piksela).
+fun cursor_ix() -> Int [
+    end ffi_cursor_ix()
+]
+
+fun cursor_iy() -> Int [
+    end ffi_cursor_iy()
 ]
