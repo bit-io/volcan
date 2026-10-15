@@ -695,3 +695,217 @@ fun ffi_seat_name_char(i: Int) -> Int [
     ]
     end out
 ]
+
+!! ---- v2 (ABI 2) ----
+fun ffi_ev_c() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_ev_c() -> i64; }
+        out = unsafe { vcn_ev_c() };
+    ]
+    end out
+]
+
+fun ffi_toplevel_configure_bounds(h: Int, w: Int, hh: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_toplevel_configure_bounds(h: i64, w: i64, hh: i64); }
+        unsafe { vcn_toplevel_configure_bounds(h, w, hh) };
+    ]
+    end
+]
+
+fun ffi_toplevel_min_width(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_toplevel_min_width(h: i64) -> i64; }
+        out = unsafe { vcn_toplevel_min_width(h) };
+    ]
+    end out
+]
+
+fun ffi_toplevel_min_height(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_toplevel_min_height(h: i64) -> i64; }
+        out = unsafe { vcn_toplevel_min_height(h) };
+    ]
+    end out
+]
+
+fun ffi_toplevel_max_width(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_toplevel_max_width(h: i64) -> i64; }
+        out = unsafe { vcn_toplevel_max_width(h) };
+    ]
+    end out
+]
+
+fun ffi_toplevel_max_height(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_toplevel_max_height(h: i64) -> i64; }
+        out = unsafe { vcn_toplevel_max_height(h) };
+    ]
+    end out
+]
+
+fun ffi_toplevel_supports_ssd(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_toplevel_supports_ssd(h: i64) -> i64; }
+        out = unsafe { vcn_toplevel_supports_ssd(h) };
+    ]
+    end out
+]
+
+fun ffi_toplevel_decoration(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_toplevel_decoration(h: i64) -> i64; }
+        out = unsafe { vcn_toplevel_decoration(h) };
+    ]
+    end out
+]
+
+fun ffi_toplevel_set_decoration(h: Int, server_side: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_toplevel_set_decoration(h: i64, server_side: i64); }
+        unsafe { vcn_toplevel_set_decoration(h, server_side) };
+    ]
+    end
+]
+
+fun ffi_output_available_x(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_output_available_x(h: i64) -> i64; }
+        out = unsafe { vcn_output_available_x(h) };
+    ]
+    end out
+]
+
+fun ffi_output_available_y(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_output_available_y(h: i64) -> i64; }
+        out = unsafe { vcn_output_available_y(h) };
+    ]
+    end out
+]
+
+fun ffi_output_available_width(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_output_available_width(h: i64) -> i64; }
+        out = unsafe { vcn_output_available_width(h) };
+    ]
+    end out
+]
+
+fun ffi_output_available_height(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_output_available_height(h: i64) -> i64; }
+        out = unsafe { vcn_output_available_height(h) };
+    ]
+    end out
+]
+
+fun ffi_output_transform(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_output_transform(h: i64) -> i64; }
+        out = unsafe { vcn_output_transform(h) };
+    ]
+    end out
+]
+
+fun ffi_output_set_transform(h: Int, t: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_output_set_transform(h: i64, t: i64); }
+        unsafe { vcn_output_set_transform(h, t) };
+    ]
+    end
+]
+
+fun ffi_output_mode_count(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_output_mode_count(h: i64) -> i64; }
+        out = unsafe { vcn_output_mode_count(h) };
+    ]
+    end out
+]
+
+fun ffi_output_mode_width(h: Int, i: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_output_mode_width(h: i64, i: i64) -> i64; }
+        out = unsafe { vcn_output_mode_width(h, i) };
+    ]
+    end out
+]
+
+fun ffi_output_mode_height(h: Int, i: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_output_mode_height(h: i64, i: i64) -> i64; }
+        out = unsafe { vcn_output_mode_height(h, i) };
+    ]
+    end out
+]
+
+fun ffi_output_mode_refresh(h: Int, i: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_output_mode_refresh(h: i64, i: i64) -> i64; }
+        out = unsafe { vcn_output_mode_refresh(h, i) };
+    ]
+    end out
+]
+
+fun ffi_output_mode_preferred(h: Int, i: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_output_mode_preferred(h: i64, i: i64) -> i64; }
+        out = unsafe { vcn_output_mode_preferred(h, i) };
+    ]
+    end out
+]
+
+fun ffi_output_current_mode(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_output_current_mode(h: i64) -> i64; }
+        out = unsafe { vcn_output_current_mode(h) };
+    ]
+    end out
+]
+
+fun ffi_output_set_mode(h: Int, i: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_output_set_mode(h: i64, i: i64) -> i64; }
+        out = unsafe { vcn_output_set_mode(h, i) };
+    ]
+    end out
+]
+
+fun ffi_cursor_ix() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_cursor_ix() -> i64; }
+        out = unsafe { vcn_cursor_ix() };
+    ]
+    end out
+]
+
+fun ffi_cursor_iy() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_cursor_iy() -> i64; }
+        out = unsafe { vcn_cursor_iy() };
+    ]
+    end out
+]
