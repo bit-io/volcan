@@ -1,0 +1,165 @@
+include <strings>
+include <surface>
+include <layout>
+include <files>
+include <wm>
+
+!! Zapis i odtworzenie stanu zarzadcy okien miedzy uruchomieniami.
+!!
+!! Uchwyty okien nie przezywaja restartu, wiec zapisujemy cechy okien (przestrzen, tryb, wyjscie,
+!! przyklejenie, scratchpad) razem z app_id i tytulem. Po restarcie wm_state_restore wczytuje
+!! ustawienia globalne (przestrzen, uklady, proporcje, odstep...) i liste "oczekujacych" okien;
+!! gdy okno o takim app_id sie pojawi, wm_classify daje mu zapisane cechy.
+!!
+!!   przy zamykaniu: wm_state_save(wm, sciezka)
+!!   przy starcie:   wm = wm_state_restore(wm_new(), sciezka)   (przed pierwszym oknem)
+!!
+!! Format: tekst; pierwsza linia `volcan-state 1`, potem `klucz=wartosc` i linie `win=...`.
+
+fun state_join(a: List<Int>) -> Str [
+    let out = ""
+    let i = 0
+    while i < a.len() [
+        if i > 0 [
+            out = out + ","
+        ]
+        out = out + (a[i] as Str)
+        i = i + 1
+    ]
+    end out
+]
+
+fun state_clean(s: Str) -> Str [
+    end str_replace_char(str_replace_char(str_replace_char(s, "|", " "), "\n", " "), "\r", " ")
+]
+
+!! Stan jako tekst.
+fun wm_state_text(w: Wm) -> Str [
+    let out = "volcan-state 1\n"
+    out = out + "current=" + (w.current as Str) + "\n"
+    out = out + "per_output=" + (w.per_output as Str) + "\n"
+    out = out + "ffm=" + (w.ffm as Str) + "\n"
+    out = out + "gap=" + (w.gap as Str) + "\n"
+    out = out + "cur_out=" + (w.cur_out as Str) + "\n"
+    out = out + "layout=" + state_join(w.wlayout) + "\n"
+    out = out + "ratio=" + state_join(w.wratio) + "\n"
+    out = out + "ocur=" + state_join(w.ocur) + "\n"
+    let i = 0
+    while i < w.handles.len() [
+        let h = w.handles[i]
+        let scratch_ws = w.ws[i]
+        out = out + "win=" + (scratch_ws as Str) + "|" + (w.mode[i] as Str) + "|" + (w.outs[i] as Str) + "|" + (w.sticky[i] as Str) + "|" + state_clean(toplevel_app_id(h)) + "|" + state_clean(toplevel_title(h)) + "\n"
+        i = i + 1
+    ]
+    end out
+]
+
+fun wm_state_save(w: Wm, path: Str) -> Bool [
+    end file_write(path, wm_state_text(w))
+]
+
+fun state_ints(value: Str, fallback: Int) -> List<Int> [
+    let out: List<Int> = []
+    let parts = str_split(value, ",")
+    let i = 0
+    while i < parts.len() [
+        out.push(str_int(parts[i].clone(), fallback))
+        i = i + 1
+    ]
+    end out
+]
+
+fun state_clamp(v: Int, lo: Int, hi: Int) -> Int [
+    if v < lo [
+        end lo
+    ]
+    if v > hi [
+        end hi
+    ]
+    end v
+]
+
+!! Stosuje zapisany tekst do stanu (odporne na uszkodzone dane: nieznane linie i zle liczby sa ignorowane).
+fun wm_state_apply(w: Wm, text: Str) -> Wm [
+    let r = w.clone()
+    let lines = str_split(text, "\n")
+    if lines.len() == 0 or str_trim(lines[0].clone()) != "volcan-state 1" [
+        end r
+    ]
+    let i = 1
+    while i < lines.len() [
+        let line = str_trim(lines[i].clone())
+        let eq = str_find(line, "=", 0)
+        if eq > 0 [
+            let key = str_sub(line, 0, eq)
+            let val = str_sub(line, eq + 1, str_len(line))
+            if key == "current" [
+                r.current = state_clamp(str_int(val, 0), 0, WM_WORKSPACES - 1)
+            ]
+            if key == "per_output" [
+                r.per_output = state_clamp(str_int(val, 0), 0, 1)
+            ]
+            if key == "ffm" [
+                r.ffm = state_clamp(str_int(val, 0), 0, 1)
+            ]
+            if key == "gap" [
+                r.gap = state_clamp(str_int(val, 8), 0, 200)
+            ]
+            if key == "cur_out" [
+                r.cur_out = state_clamp(str_int(val, 0), 0, WM_OUTPUTS_MAX - 1)
+            ]
+            if key == "layout" [
+                let v = state_ints(val, 0)
+                let j = 0
+                while j < v.len() and j < WM_WORKSPACES [
+                    r.wlayout[j] = state_clamp(v[j], 0, LAYOUT_COUNT - 1)
+                    j = j + 1
+                ]
+            ]
+            if key == "ratio" [
+                let v = state_ints(val, 550)
+                let j = 0
+                while j < v.len() and j < WM_WORKSPACES [
+                    r.wratio[j] = state_clamp(v[j], 200, 800)
+                    j = j + 1
+                ]
+            ]
+            if key == "ocur" [
+                let v = state_ints(val, 0)
+                let j = 0
+                while j < v.len() and j < WM_OUTPUTS_MAX [
+                    r.ocur[j] = state_clamp(v[j], 0, WM_WORKSPACES - 1)
+                    j = j + 1
+                ]
+            ]
+            if key == "win" and r.pend_app.len() < 256 [
+                let f = str_split(val, "|")
+                if f.len() >= 6 [
+                    let ws = str_int(f[0].clone(), 0)
+                    if ws != WM_SCRATCH_WS [
+                        ws = state_clamp(ws, 0, WM_WORKSPACES - 1)
+                    ]
+                    r.pend_ws.push(ws)
+                    r.pend_mode.push(state_clamp(str_int(f[1].clone(), 0), 0, 3))
+                    r.pend_out.push(state_clamp(str_int(f[2].clone(), 0), 0, WM_OUTPUTS_MAX - 1))
+                    r.pend_sticky.push(state_clamp(str_int(f[3].clone(), 0), 0, 1))
+                    r.pend_app.push(f[4].clone())
+                    r.pend_title.push(f[5].clone())
+                    r.pend_used.push(0)
+                ]
+            ]
+        ]
+        i = i + 1
+    ]
+    r.focus = 0
+    end r
+]
+
+!! Wczytuje stan z pliku; gdy pliku nie ma albo jest uszkodzony, zwraca stan bez zmian.
+fun wm_state_restore(w: Wm, path: Str) -> Wm [
+    let f = file_read(path)
+    if not f.ok [
+        end w.clone()
+    ]
+    end wm_state_apply(w, f.data)
+]
