@@ -1,0 +1,106 @@
+include <input>
+include <surface>
+include <events>
+include <layout>
+
+!! Interaktywne przesuwanie i zmiana rozmiaru okna myszka.
+!!
+!! Uzycie (stan trzyma wywolujacy; funkcje nie zmieniaja argumentu, tylko zwracaja nowy Grab):
+!!   let g = grab_none()
+!!   na EV_POINTER_BUTTON z wcisnietym Super: g = grab_begin_move(okno_pod_kursorem)
+!!   na EV_POINTER_MOVE:                      grab_update(g)
+!!   po puszczeniu przycisku:                 g = grab_none()
+
+const GRAB_NONE: Int = 0
+const GRAB_MOVE: Int = 1
+const GRAB_RESIZE: Int = 2
+
+!! Minimalny rozmiar okna podczas zmiany rozmiaru.
+const GRAB_MIN_SIZE: Int = 80
+
+struct Grab [
+    kind: Int,
+    handle: Int,
+    cursor_x: Int,
+    cursor_y: Int,
+    origin_x: Int,
+    origin_y: Int,
+    width: Int,
+    height: Int,
+    edges: Int
+]
+
+fun grab_none() -> Grab [
+    end Grab(GRAB_NONE, 0, 0, 0, 0, 0, 0, 0, 0)
+]
+
+fun grab_active(g: Grab) -> Bool [
+    end g.kind != GRAB_NONE
+]
+
+fun grab_begin_move(h: Int) -> Grab [
+    end Grab(GRAB_MOVE, h, cursor_ix(), cursor_iy(), surface_x(h), surface_y(h), toplevel_window_width(h), toplevel_window_height(h), 0)
+]
+
+!! `edges` to suma masek EDGE_* z events.hcs (np. EDGE_RIGHT + EDGE_BOTTOM).
+fun grab_begin_resize(h: Int, edges: Int) -> Grab [
+    end Grab(GRAB_RESIZE, h, cursor_ix(), cursor_iy(), surface_x(h), surface_y(h), toplevel_window_width(h), toplevel_window_height(h), edges)
+]
+
+!! Liczy nowy prostokat (x, y, w, h) dla przesuniecia kursora o dx, dy.
+fun grab_rect(g: Grab, dx: Int, dy: Int) -> Rect [
+    if g.kind == GRAB_MOVE [
+        end Rect(g.origin_x + dx, g.origin_y + dy, g.width, g.height)
+    ]
+    let x = g.origin_x
+    let y = g.origin_y
+    let w = g.width
+    let h = g.height
+    !! EDGE_TOP=1, EDGE_BOTTOM=2, EDGE_LEFT=4, EDGE_RIGHT=8
+    let right = g.edges % 16 >= 8
+    let left = g.edges % 8 >= 4
+    let bottom = g.edges % 4 >= 2
+    let top = g.edges % 2 >= 1
+    if right [
+        w = g.width + dx
+    ]
+    if left [
+        w = g.width - dx
+    ]
+    if bottom [
+        h = g.height + dy
+    ]
+    if top [
+        h = g.height - dy
+    ]
+    if w < GRAB_MIN_SIZE [
+        w = GRAB_MIN_SIZE
+    ]
+    if h < GRAB_MIN_SIZE [
+        h = GRAB_MIN_SIZE
+    ]
+    if left [
+        x = g.origin_x + g.width - w
+    ]
+    if top [
+        y = g.origin_y + g.height - h
+    ]
+    end Rect(x, y, w, h)
+]
+
+!! Wywolywac przy kazdym ruchu kursora, gdy grab_active.
+fun grab_update(g: Grab) [
+    if g.kind == GRAB_NONE [
+        end
+    ]
+    let dx = cursor_ix() - g.cursor_x
+    let dy = cursor_iy() - g.cursor_y
+    let handle = g.handle
+    let kind = g.kind
+    let r = grab_rect(g, dx, dy)
+    if kind == GRAB_RESIZE [
+        toplevel_resize(handle, r.w, r.h)
+    ]
+    surface_move(handle, r.x, r.y)
+    end
+]
