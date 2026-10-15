@@ -1,0 +1,370 @@
+include <strings>
+include <config>
+include <keys>
+include <input>
+
+!! Mapa skrotow z konfiguracji, z trybami i sekwencjami klawiszy.
+!!
+!!   bind.1 = Super+Return : spawn foot
+!!   bind.2 = Super+Shift+q : close
+!!   bind.3 = Super+x, c : spawn firefox        !! sekwencja: najpierw Super+x, potem samo c
+!!   bind.4 = Super+r : mode resize             !! przejscie do trybu "resize"
+!!   modes = resize
+!!   mode.resize.bind.1 = h : ratio down        !! skroty trybu (bez modyfikatorow)
+!!   mode.resize.bind.2 = Escape : mode default
+!!
+!! Chord: modyfikatory (Super, Shift, Ctrl, Alt) polaczone plusem i nazwa klawisza (litery, cyfry,
+!! Return, Escape, Space, Tab, BackSpace, Delete, Left/Right/Up/Down, Home/End/PageUp/PageDown,
+!! F1..F12, Minus, Equal, Comma, Period, Slash, Semicolon, Apostrophe, Grave, Bracketleft/right).
+!! Wielkosc liter nie ma znaczenia. Akcja to dowolny tekst - biblioteka go nie interpretuje, poza
+!! `mode NAZWA` (zmiana trybu); reszte wykonuje aplikacja, np. przez wm_command.
+
+const BINDS_MAX: Int = 128
+
+struct Binds [
+    modes: List<Str>,
+    m1: List<Int>,
+    k1: List<Int>,
+    m2: List<Int>,
+    k2: List<Int>,
+    actions: List<Str>,
+    mode: Str,
+    pend: Int,
+    pend_mods: Int,
+    pend_key: Int,
+    errors: Int
+]
+
+struct Step [
+    mods: Int,
+    key: Int
+]
+
+struct BindResult [
+    binds: Binds,
+    action: Str,
+    consumed: Bool
+]
+
+fun binds_new() -> Binds [
+    let a: List<Str> = []
+    let b: List<Int> = []
+    let c: List<Int> = []
+    let d: List<Int> = []
+    let e: List<Int> = []
+    let f: List<Str> = []
+    end Binds(a, b, c, d, e, f, "default", 0, 0, 0, 0)
+]
+
+fun mod_from_name(name: Str) -> Int [
+    let n = str_lower(name)
+    if n == "super" or n == "mod4" or n == "logo" or n == "win" or n == "meta" [
+        end MOD_SUPER
+    ]
+    if n == "shift" [
+        end MOD_SHIFT
+    ]
+    if n == "ctrl" or n == "control" [
+        end MOD_CTRL
+    ]
+    if n == "alt" or n == "mod1" [
+        end MOD_ALT
+    ]
+    end 0
+]
+
+!! Kod klawisza (linux input) z nazwy albo -1.
+fun key_code(name: Str) -> Int [
+    let n = str_lower(str_trim(name))
+    if str_len(n) == 1 [
+        let i = str_find("1234567890", n, 0)
+        if i >= 0 [
+            end 2 + i
+        ]
+        i = str_find("qwertyuiop", n, 0)
+        if i >= 0 [
+            end 16 + i
+        ]
+        i = str_find("asdfghjkl", n, 0)
+        if i >= 0 [
+            end 30 + i
+        ]
+        i = str_find("zxcvbnm", n, 0)
+        if i >= 0 [
+            end 44 + i
+        ]
+    ]
+    if n == "return" or n == "enter" [
+        end 28
+    ]
+    if n == "escape" or n == "esc" [
+        end 1
+    ]
+    if n == "space" [
+        end 57
+    ]
+    if n == "tab" [
+        end 15
+    ]
+    if n == "backspace" [
+        end 14
+    ]
+    if n == "delete" [
+        end 111
+    ]
+    if n == "insert" [
+        end 110
+    ]
+    if n == "home" [
+        end 102
+    ]
+    if n == "end" [
+        end 107
+    ]
+    if n == "pageup" or n == "page_up" or n == "prior" [
+        end 104
+    ]
+    if n == "pagedown" or n == "page_down" or n == "next" [
+        end 109
+    ]
+    if n == "left" [
+        end 105
+    ]
+    if n == "right" [
+        end 106
+    ]
+    if n == "up" [
+        end 103
+    ]
+    if n == "down" [
+        end 108
+    ]
+    if n == "minus" [
+        end 12
+    ]
+    if n == "equal" [
+        end 13
+    ]
+    if n == "bracketleft" [
+        end 26
+    ]
+    if n == "bracketright" [
+        end 27
+    ]
+    if n == "semicolon" [
+        end 39
+    ]
+    if n == "apostrophe" [
+        end 40
+    ]
+    if n == "grave" [
+        end 41
+    ]
+    if n == "backslash" [
+        end 43
+    ]
+    if n == "comma" [
+        end 51
+    ]
+    if n == "period" or n == "dot" [
+        end 52
+    ]
+    if n == "slash" [
+        end 53
+    ]
+    if n == "print" [
+        end 99
+    ]
+    if str_starts_with(n, "f") and str_len(n) >= 2 [
+        let f = str_int(str_sub(n, 1, str_len(n)), 0)
+        if f >= 1 and f <= 10 [
+            end 58 + f
+        ]
+        if f == 11 [
+            end 87
+        ]
+        if f == 12 [
+            end 88
+        ]
+    ]
+    end -1
+]
+
+!! Jeden krok: "Super+Shift+q" -> modyfikatory i klawisz (key = -1, gdy zapis jest bledny).
+fun bind_step(step: Str) -> Step [
+    let parts = str_split(str_trim(step), "+")
+    let mods = 0
+    let key = -1
+    let i = 0
+    let last = parts.len() - 1
+    while i <= last [
+        let p = str_trim(parts[i].clone())
+        if i < last [
+            let m = mod_from_name(p)
+            if m == 0 [
+                end Step(0, -1)
+            ]
+            if (mods / m) % 2 == 0 [
+                mods = mods + m
+            ]
+        ] else [
+            key = key_code(p)
+        ]
+        i = i + 1
+    ]
+    end Step(mods, key)
+]
+
+!! Dodaje skrot z zapisu "chord[, chord] : akcja" do podanego trybu; bledny zapis zwieksza `errors`.
+fun binds_add(b: Binds, mode: Str, spec: Str) -> Binds [
+    let r = b.clone()
+    let colon = str_find(spec, ":", 0)
+    if colon < 0 [
+        r.errors = r.errors + 1
+        end r
+    ]
+    let left = str_trim(str_sub(spec, 0, colon))
+    let action = str_trim(str_sub(spec, colon + 1, str_len(spec)))
+    let steps = str_split(left, ",")
+    if action == "" or steps.len() > 2 [
+        r.errors = r.errors + 1
+        end r
+    ]
+    let s1 = bind_step(steps[0].clone())
+    if s1.key < 0 [
+        r.errors = r.errors + 1
+        end r
+    ]
+    let m2 = 0
+    let k2 = -1
+    if steps.len() == 2 [
+        let s2 = bind_step(steps[1].clone())
+        if s2.key < 0 [
+            r.errors = r.errors + 1
+            end r
+        ]
+        m2 = s2.mods
+        k2 = s2.key
+    ]
+    r.modes.push(mode)
+    r.m1.push(s1.mods)
+    r.k1.push(s1.key)
+    r.m2.push(m2)
+    r.k2.push(k2)
+    r.actions.push(action)
+    end r
+]
+
+!! Wczytuje skroty z konfiguracji (bind.N, a dla trybow z `modes` takze mode.NAZWA.bind.N).
+fun binds_load() -> Binds [
+    let b = binds_new()
+    let n = 1
+    while n <= BINDS_MAX [
+        let key = "bind." + (n as Str)
+        if config_has(key) [
+            b = binds_add(b, "default", config_get(key, ""))
+        ]
+        n = n + 1
+    ]
+    let names = str_split(config_get("modes", ""), ",")
+    let i = 0
+    while i < names.len() [
+        let name = str_trim(names[i].clone())
+        if name != "" and name != "default" [
+            let m = 1
+            while m <= BINDS_MAX [
+                let key = "mode." + name + ".bind." + (m as Str)
+                if config_has(key) [
+                    b = binds_add(b, name, config_get(key, ""))
+                ]
+                m = m + 1
+            ]
+        ]
+        i = i + 1
+    ]
+    end b
+]
+
+fun binds_count(b: Binds) -> Int [
+    end b.actions.len()
+]
+
+fun binds_fire(b: Binds, i: Int) -> BindResult [
+    let r = b.clone()
+    let action = b.actions[i].clone()
+    if str_starts_with(action, "mode ") [
+        r.mode = str_trim(str_sub(action, 5, str_len(action)))
+        end BindResult(r, "", true)
+    ]
+    end BindResult(r, action, true)
+]
+
+!! Obsluga nacisniecia klawisza (mods = mods_now() albo mods_xkb()). consumed = true, gdy klawisz
+!! zostal zuzyty przez skrot, krok sekwencji albo zmiane trybu; action - akcja do wykonania albo "".
+fun binds_key(b: Binds, mods: Int, code: Int) -> BindResult [
+    let r = b.clone()
+    let n = b.actions.len()
+    let i = 0
+    if b.pend == 1 [
+        r.pend = 0
+        while i < n [
+            if b.modes[i] == b.mode and b.k2[i] >= 0 and b.m1[i] == b.pend_mods and b.k1[i] == b.pend_key and b.m2[i] == mods and b.k2[i] == code [
+                end binds_fire(r, i)
+            ]
+            i = i + 1
+        ]
+        if code == KEY_ESC [
+            end BindResult(r, "", true)
+        ]
+    ]
+    let multi = -1
+    i = 0
+    while i < n [
+        if b.modes[i] == r.mode and b.m1[i] == mods and b.k1[i] == code [
+            if b.k2[i] < 0 [
+                end binds_fire(r, i)
+            ]
+            multi = i
+        ]
+        i = i + 1
+    ]
+    if multi >= 0 [
+        r.pend = 1
+        r.pend_mods = mods
+        r.pend_key = code
+        end BindResult(r, "", true)
+    ]
+    end BindResult(r, "", false)
+]
+
+!! Domyslne skroty (gdy w konfiguracji nie ma bind.1); `terminal` to program uruchamiany Super+Return.
+fun binds_install_defaults(terminal: Str) [
+    if config_has("bind.1") [
+        end
+    ]
+    config_set("bind.1", "Super+Return : spawn " + terminal)
+    config_set("bind.2", "Super+q : close")
+    config_set("bind.3", "Super+j : focus next")
+    config_set("bind.4", "Super+k : focus prev")
+    config_set("bind.5", "Super+h : ratio down")
+    config_set("bind.6", "Super+l : ratio up")
+    config_set("bind.7", "Super+space : layout next")
+    config_set("bind.8", "Super+f : float")
+    config_set("bind.9", "Super+o : output next")
+    config_set("bind.10", "Super+Shift+Return : promote")
+    config_set("bind.11", "Super+s : sticky")
+    config_set("bind.12", "Super+minus : scratchpad")
+    config_set("bind.13", "Super+Shift+minus : scratch send")
+    config_set("bind.14", "Super+u : urgent")
+    config_set("bind.15", "Super+t : layout tabbed")
+    config_set("bind.16", "Super+Shift+t : layout stacked")
+    config_set("bind.17", "Super+e : layout master")
+    config_set("bind.18", "Ctrl+Alt+Escape : quit")
+    let d = 1
+    while d <= 9 [
+        config_set("bind." + ((18 + d) as Str), "Super+" + (d as Str) + " : workspace " + (d as Str))
+        config_set("bind." + ((27 + d) as Str), "Super+Shift+" + (d as Str) + " : send " + (d as Str))
+        d = d + 1
+    ]
+    end
+]
