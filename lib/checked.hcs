@@ -1,0 +1,173 @@
+include <ffi>
+include <ffi_ext>
+include <text>
+include <surface>
+include <output>
+
+!! Typowane uchwyty i bledy jako wartosci.
+!!
+!! Podstawowe funkcje (surface.hcs, output.hcs) zwracaja 0, -1 albo false dla nieprawidlowego uchwytu;
+!! powod mozna odczytac z compositor_last_error(). Ten modul daje bezpieczniejsza alternatywe:
+!!   * uchwyty maja osobne typy (SurfaceId, ToplevelId, OutputId) - nie pomylisz okna z wyjsciem,
+!!   * uchwyt tworzy sie przez funkcje *_checked, ktora go sprawdza (zywy? wlasciwy rodzaj?),
+!!   * operacje zwracaja Status (kod + opis) zamiast gubic blad.
+
+const ST_OK: Int = 0
+const ST_THREAD: Int = 1
+const ST_HANDLE: Int = 2
+const ST_STATE: Int = 3
+const ST_ARG: Int = 4
+const ST_UNSUPPORTED: Int = 5
+const ST_IO: Int = 6
+const ST_DENIED: Int = 7
+
+struct Status [
+    code: Int,
+    message: Str
+]
+
+struct SurfaceId [
+    id: Int
+]
+
+struct ToplevelId [
+    id: Int
+]
+
+struct OutputId [
+    id: Int
+]
+
+struct SurfaceResult [
+    status: Status,
+    value: SurfaceId
+]
+
+struct ToplevelResult [
+    status: Status,
+    value: ToplevelId
+]
+
+struct OutputResult [
+    status: Status,
+    value: OutputId
+]
+
+struct StrResult [
+    status: Status,
+    value: Str
+]
+
+fun status_ok() -> Status [
+    end Status(ST_OK, "")
+]
+
+fun status_error(code: Int, message: Str) -> Status [
+    end Status(code, message)
+]
+
+fun status_is_ok(s: Status) -> Bool [
+    end s.code == ST_OK
+]
+
+!! Stan ostatniego bledu shima (kod i opis); ST_OK, gdy bledu nie bylo.
+fun status_last() -> Status [
+    let code = ffi_last_code()
+    if code == ST_OK [
+        end status_ok()
+    ]
+    ffi_last_error()
+    end Status(code, text_read(4, 0))
+]
+
+fun checked_clear() [
+    ffi_clear_error()
+    end
+]
+
+fun surface_checked(h: Int) -> SurfaceResult [
+    if h == 0 or ffi_surface_valid(h) == 0 [
+        end SurfaceResult(status_error(ST_HANDLE, "nieprawidlowy uchwyt powierzchni"), SurfaceId(0))
+    ]
+    end SurfaceResult(status_ok(), SurfaceId(h))
+]
+
+fun toplevel_checked(h: Int) -> ToplevelResult [
+    if h == 0 or ffi_surface_valid(h) == 0 [
+        end ToplevelResult(status_error(ST_HANDLE, "nieprawidlowy uchwyt powierzchni"), ToplevelId(0))
+    ]
+    if surface_role(h) != ROLE_TOPLEVEL [
+        end ToplevelResult(status_error(ST_STATE, "powierzchnia nie jest oknem toplevel"), ToplevelId(0))
+    ]
+    end ToplevelResult(status_ok(), ToplevelId(h))
+]
+
+fun output_checked(h: Int) -> OutputResult [
+    let outs = output_list()
+    let i = 0
+    while i < outs.len() [
+        if outs[i] == h [
+            end OutputResult(status_ok(), OutputId(h))
+        ]
+        i = i + 1
+    ]
+    end OutputResult(status_error(ST_HANDLE, "nieprawidlowy uchwyt wyjscia"), OutputId(0))
+]
+
+!! ---- operacje z kodem bledu ----
+
+fun tl_close(t: ToplevelId) -> Status [
+    ffi_clear_error()
+    ffi_toplevel_close(t.id)
+    end status_last()
+]
+
+fun tl_move(t: ToplevelId, x: Int, y: Int) -> Status [
+    ffi_clear_error()
+    ffi_surface_set_pos(t.id, x, y)
+    end status_last()
+]
+
+fun tl_resize(t: ToplevelId, width: Int, height: Int) -> Status [
+    if width < 1 or height < 1 [
+        end status_error(ST_ARG, "rozmiar okna musi byc dodatni")
+    ]
+    ffi_clear_error()
+    ffi_toplevel_configure_size(t.id, width, height)
+    end status_last()
+]
+
+fun tl_title(t: ToplevelId) -> StrResult [
+    ffi_clear_error()
+    let s = toplevel_title(t.id)
+    let st = status_last()
+    if st.code != ST_OK [
+        end StrResult(st, "")
+    ]
+    end StrResult(st, s)
+]
+
+fun tl_app_id(t: ToplevelId) -> StrResult [
+    ffi_clear_error()
+    let s = toplevel_app_id(t.id)
+    let st = status_last()
+    if st.code != ST_OK [
+        end StrResult(st, "")
+    ]
+    end StrResult(st, s)
+]
+
+fun out_name(o: OutputId) -> StrResult [
+    ffi_clear_error()
+    let s = output_name(o.id)
+    let st = status_last()
+    if st.code != ST_OK [
+        end StrResult(st, "")
+    ]
+    end StrResult(st, s)
+]
+
+!! Ile razy wywolano funkcje shima z niewlasciwego watku (kontrakt jednowatkowy); powinno byc 0.
+fun thread_violations() -> Int [
+    end ffi_thread_violations()
+]
