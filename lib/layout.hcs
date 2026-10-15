@@ -1,0 +1,233 @@
+include <surface>
+
+!! Uklady kafelkowe. Czysta arytmetyka na liczbach calkowitych (bez Float),
+!! wiec wynik jest deterministyczny i przenosny.
+
+const LAYOUT_MASTER_STACK: Int = 0
+const LAYOUT_COLUMNS: Int = 1
+const LAYOUT_GRID: Int = 2
+const LAYOUT_MONOCLE: Int = 3
+!! Zakladki: jedno okno na raz pod paskiem kart (karty obok siebie).
+const LAYOUT_TABBED: Int = 4
+!! Stos: jedno okno na raz pod paskami tytulowymi ulozonymi jeden pod drugim.
+const LAYOUT_STACKED: Int = 5
+const LAYOUT_COUNT: Int = 6
+
+!! Wysokosc paska karty / tytulu w ukladach LAYOUT_TABBED i LAYOUT_STACKED.
+const LAYOUT_TAB_H: Int = 24
+
+struct Rect [
+    x: Int,
+    y: Int,
+    w: Int,
+    h: Int
+]
+
+!! Zmniejsza prostokat o `d` z kazdej strony (nie schodzi ponizej 1x1).
+fun rect_inset(r: Rect, d: Int) -> Rect [
+    let w = r.w - 2 * d
+    let h = r.h - 2 * d
+    if w < 1 [
+        w = 1
+    ]
+    if h < 1 [
+        h = 1
+    ]
+    end Rect(r.x + d, r.y + d, w, h)
+]
+
+!! Dlugosc i-tego z `count` odcinkow podzialu `total` z przerwami `gap`.
+!! Reszta z dzielenia trafia do pierwszych odcinkow, wiec suma zawsze sie zgadza.
+fun span_len(total: Int, count: Int, gap: Int, i: Int) -> Int [
+    let usable = total - gap * (count - 1)
+    if usable < count [
+        usable = count
+    ]
+    let base = usable / count
+    let rem = usable % count
+    if i < rem [
+        end base + 1
+    ]
+    end base
+]
+
+!! Poczatek (przesuniecie od krawedzi) i-tego odcinka.
+fun span_start(total: Int, count: Int, gap: Int, i: Int) -> Int [
+    let pos = 0
+    let k = 0
+    while k < i [
+        pos = pos + span_len(total, count, gap, k) + gap
+        k = k + 1
+    ]
+    end pos
+]
+
+!! Master po lewej (`master_permille` promili szerokosci), reszta w stosie po prawej.
+fun layout_master_stack(n: Int, ax: Int, ay: Int, aw: Int, ah: Int, gap: Int, master_permille: Int) -> List<Rect> [
+    let out: List<Rect> = []
+    if n < 1 [
+        end out
+    ]
+    if n == 1 [
+        out.push(Rect(ax, ay, aw, ah))
+        end out
+    ]
+    let mw = (aw - gap) * master_permille / 1000
+    if mw < 1 [
+        mw = 1
+    ]
+    let sw = aw - gap - mw
+    if sw < 1 [
+        sw = 1
+    ]
+    out.push(Rect(ax, ay, mw, ah))
+    let rest = n - 1
+    let i = 0
+    while i < rest [
+        out.push(Rect(ax + mw + gap, ay + span_start(ah, rest, gap, i), sw, span_len(ah, rest, gap, i)))
+        i = i + 1
+    ]
+    end out
+]
+
+!! Wszystkie okna obok siebie, kazde na pelna wysokosc.
+fun layout_columns(n: Int, ax: Int, ay: Int, aw: Int, ah: Int, gap: Int) -> List<Rect> [
+    let out: List<Rect> = []
+    let i = 0
+    while i < n [
+        out.push(Rect(ax + span_start(aw, n, gap, i), ay, span_len(aw, n, gap, i), ah))
+        i = i + 1
+    ]
+    end out
+]
+
+!! Siatka mozliwie kwadratowa; niepelny ostatni wiersz rozciaga sie na cala szerokosc.
+fun layout_grid(n: Int, ax: Int, ay: Int, aw: Int, ah: Int, gap: Int) -> List<Rect> [
+    let out: List<Rect> = []
+    if n < 1 [
+        end out
+    ]
+    let cols = 1
+    while cols * cols < n [
+        cols = cols + 1
+    ]
+    let rows = (n + cols - 1) / cols
+    let i = 0
+    while i < n [
+        let row = i / cols
+        let col = i % cols
+        let in_row = cols
+        if n - row * cols < cols [
+            in_row = n - row * cols
+        ]
+        out.push(Rect(ax + span_start(aw, in_row, gap, col), ay + span_start(ah, rows, gap, row), span_len(aw, in_row, gap, col), span_len(ah, rows, gap, row)))
+        i = i + 1
+    ]
+    end out
+]
+
+!! Kazde okno na caly obszar (przelaczanie fokusem).
+fun layout_monocle(n: Int, ax: Int, ay: Int, aw: Int, ah: Int) -> List<Rect> [
+    let out: List<Rect> = []
+    let i = 0
+    while i < n [
+        out.push(Rect(ax, ay, aw, ah))
+        i = i + 1
+    ]
+    end out
+]
+
+!! Wysokosc pasow kart dla ukladu zakladek/stosu (0 dla pozostalych), ograniczona tak, by okno mialo >= 20 px.
+fun layout_bars_height(kind: Int, n: Int, ah: Int) -> Int [
+    let total = 0
+    if kind == LAYOUT_TABBED [
+        total = LAYOUT_TAB_H
+    ]
+    if kind == LAYOUT_STACKED [
+        total = LAYOUT_TAB_H * n
+    ]
+    if total > ah - 20 [
+        total = ah - 20
+    ]
+    if total < 0 [
+        total = 0
+    ]
+    end total
+]
+
+!! Prostokaty okien w ukladzie zakladek lub stosu: wszystkie okna dostaja ten sam obszar pod paskami.
+fun layout_stack_like(kind: Int, n: Int, ax: Int, ay: Int, aw: Int, ah: Int) -> List<Rect> [
+    let out: List<Rect> = []
+    let bars = layout_bars_height(kind, n, ah)
+    let i = 0
+    while i < n [
+        out.push(Rect(ax, ay + bars, aw, ah - bars))
+        i = i + 1
+    ]
+    end out
+]
+
+!! Prostokaty kart (zakladki: obok siebie, stos: jeden pod drugim) albo pusta lista dla innych ukladow.
+fun layout_tabs(kind: Int, n: Int, area: Rect) -> List<Rect> [
+    let out: List<Rect> = []
+    if n < 1 [
+        end out
+    ]
+    let bars = layout_bars_height(kind, n, area.h)
+    if kind == LAYOUT_TABBED and bars > 0 [
+        let i = 0
+        while i < n [
+            out.push(Rect(area.x + span_start(area.w, n, 2, i), area.y, span_len(area.w, n, 2, i), bars))
+            i = i + 1
+        ]
+    ]
+    if kind == LAYOUT_STACKED and bars > 0 [
+        let each = bars / n
+        if each < 1 [
+            each = 1
+        ]
+        let i = 0
+        while i < n [
+            out.push(Rect(area.x, area.y + i * each, area.w, each))
+            i = i + 1
+        ]
+    ]
+    end out
+]
+
+!! Wybiera uklad wg `kind` (LAYOUT_*). Zwraca dokladnie `n` prostokatow.
+fun layout_compute(kind: Int, n: Int, area: Rect, gap: Int, master_permille: Int) -> List<Rect> [
+    let ax = area.x
+    let ay = area.y
+    let aw = area.w
+    let ah = area.h
+    if kind == LAYOUT_COLUMNS [
+        end layout_columns(n, ax, ay, aw, ah, gap)
+    ]
+    if kind == LAYOUT_GRID [
+        end layout_grid(n, ax, ay, aw, ah, gap)
+    ]
+    if kind == LAYOUT_MONOCLE [
+        end layout_monocle(n, ax, ay, aw, ah)
+    ]
+    if kind == LAYOUT_TABBED or kind == LAYOUT_STACKED [
+        end layout_stack_like(kind, n, ax, ay, aw, ah)
+    ]
+    end layout_master_stack(n, ax, ay, aw, ah, gap, master_permille)
+]
+
+!! Rozklada okna z listy uchwytow wg ukladu: ustawia rozmiar i pozycje
+!! (z uwzglednieniem przesuniecia geometrii okna, np. cieni CSD).
+fun layout_apply(handles: List<Int>, kind: Int, area: Rect, gap: Int, master_permille: Int) [
+    let n = handles.len()
+    let rects = layout_compute(kind, n, area, gap, master_permille)
+    let i = 0
+    while i < n [
+        let r = rects[i].clone()
+        let h = handles[i]
+        toplevel_resize(h, r.w, r.h)
+        surface_move(h, r.x - toplevel_window_x(h), r.y - toplevel_window_y(h))
+        i = i + 1
+    ]
+    end
+]
