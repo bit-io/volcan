@@ -1,0 +1,207 @@
+include <ffi>
+include <ffi_ext>
+include <text>
+include <input>
+
+!! Wlasne rysowanie: tlo, ramki okien i prostokaty nakladek. Domyslnie wylaczone -
+!! wtedy dziala standardowe rysowanie Louvre. Kolory ARGB jako Int (0xAARRGGBB).
+
+fun argb(a: Int, r: Int, g: Int, b: Int) -> Int [
+    end a * 16777216 + r * 65536 + g * 256 + b
+]
+
+fun rgb(r: Int, g: Int, b: Int) -> Int [
+    end argb(255, r, g, b)
+]
+
+fun style_enable(on: Bool) [
+    if on [
+        ffi_style_enable(1)
+    ] else [
+        ffi_style_enable(0)
+    ]
+    end
+]
+
+fun style_background(color: Int) [
+    ffi_style_background(color)
+    end
+]
+
+!! Ramka wokol okien toplevel: grubosc w px, kolor aktywnego i nieaktywnego okna.
+fun style_border(width: Int, active: Int, inactive: Int) [
+    ffi_style_border(width, active, inactive)
+    end
+]
+
+fun overlay_clear() [
+    ffi_overlay_clear()
+    end
+]
+
+!! Dodaje prostokat rysowany nad oknami (wspolrzedne globalne); zwraca numer albo -1.
+fun overlay_rect(x: Int, y: Int, w: Int, h: Int, color: Int) -> Int [
+    end ffi_overlay_rect(x, y, w, h, color)
+]
+
+fun overlay_count() -> Int [
+    end ffi_overlay_count()
+]
+
+!! Promien zaokraglenia rogow okien toplevel (0 = bez zaokraglen).
+fun style_radius(radius: Int) [
+    ffi_style_radius(radius)
+    end
+]
+
+!! Cien pod oknami: promien rozmycia (0 = brak), przesuniecie i kolor ARGB.
+fun style_shadow(radius: Int, dx: Int, dy: Int, color: Int) [
+    ffi_style_shadow(radius, dx, dy, color)
+    end
+]
+
+!! Nakladki w grupach: grupa 0 to nakladki uzytkownika, zarzadca okien uzywa grupy WM_OVERLAY_GROUP.
+fun overlay_rect_g(group: Int, x: Int, y: Int, w: Int, h: Int, color: Int) -> Int [
+    end ffi_overlay_rect_g(group, x, y, w, h, color)
+]
+
+fun overlay_clear_group(group: Int) [
+    ffi_overlay_clear_group(group)
+    end
+]
+
+!! Tekst nakladki; (x, y) to linia bazowa, `size` w pikselach. Zwraca numer albo -1.
+fun overlay_text(group: Int, x: Int, y: Int, size: Int, color: Int, text: Str) -> Int [
+    ffi_buf_clear(0)
+    text_push(0, text)
+    end ffi_overlay_text(group, x, y, size, color)
+]
+
+!! ---- dekoracje po stronie serwera (pasek tytulowy z tekstem i przyciskami) ----
+const DECO_OFF: Int = 0
+const DECO_ALL: Int = 1
+const DECO_SSD: Int = 2
+
+const DECO_PART_NONE: Int = 0
+const DECO_PART_TITLE: Int = 1
+const DECO_PART_CLOSE: Int = 2
+const DECO_PART_MAXIMIZE: Int = 3
+const DECO_PART_MINIMIZE: Int = 4
+
+!! DECO_ALL - wszystkie toplevele; DECO_SSD - tylko te, ktore zgodzily sie na dekoracje serwera.
+fun deco_enable(mode: Int) [
+    ffi_deco_enable(mode)
+    end
+]
+
+fun deco_style(bar_height: Int, font_px: Int, bg_active: Int, bg_inactive: Int, fg_active: Int, fg_inactive: Int) [
+    ffi_deco_style(bar_height, font_px, bg_active, bg_inactive, fg_active, fg_inactive)
+    end
+]
+
+fun deco_buttons(size: Int, gap: Int, close_color: Int, maximize_color: Int, minimize_color: Int) [
+    ffi_deco_buttons(size, gap, close_color, maximize_color, minimize_color)
+    end
+]
+
+fun deco_font(family: Str) [
+    ffi_buf_clear(0)
+    text_push(0, family)
+    ffi_deco_font()
+    end
+]
+
+fun deco_bar_height() -> Int [
+    end ffi_deco_bar_height()
+]
+
+struct DecoHit [
+    handle: Int,
+    part: Int
+]
+
+!! Co jest pod kursorem w dekoracjach okien: uchwyt okna (0 = nic) i czesc (DECO_PART_*).
+fun deco_hit_at_cursor() -> DecoHit [
+    end DecoHit(ffi_deco_hit_handle(cursor_x(), cursor_y()), ffi_deco_hit_part(cursor_x(), cursor_y()))
+]
+
+!! ---- tapeta z pliku ----
+const WALL_STRETCH: Int = 0
+const WALL_FILL: Int = 1
+const WALL_FIT: Int = 2
+const WALL_CENTER: Int = 3
+
+!! Wczytuje obraz (format wg obslugi Ream) i rysuje go na kazdym wyjsciu. Wymaga style_enable(true)
+!! i wystartowanego kompozytora. Przy bledzie zwraca false (patrz compositor_last_error).
+fun wallpaper_set(path: Str, mode: Int) -> Bool [
+    ffi_buf_clear(0)
+    text_push(0, path)
+    end ffi_wallpaper_set(mode) == 1
+]
+
+fun wallpaper_clear() [
+    ffi_wallpaper_clear()
+    end
+]
+
+!! ---- stan rysowania okna i animacje ----
+const EASE_LINEAR: Int = 0
+const EASE_OUT: Int = 1
+const EASE_IN: Int = 2
+const EASE_IN_OUT: Int = 3
+
+!! Krycie okna w promilach (1000 = pelne). Dziala przy wlaczonym style_enable.
+fun window_set_alpha(h: Int, permille: Int) [
+    ffi_window_set_alpha(h, permille)
+    end
+]
+
+!! Skala rysowania okna wokol srodka, w promilach (1000 = bez zmian).
+fun window_set_scale(h: Int, permille: Int) [
+    ffi_window_set_scale(h, permille)
+    end
+]
+
+!! Wlasny kolor ramki okna (np. pilne); enabled = false przywraca domyslny.
+fun window_set_border(h: Int, color: Int, enabled: Bool) [
+    if enabled [
+        ffi_window_set_border(h, color, 1)
+    ] else [
+        ffi_window_set_border(h, color, 0)
+    ]
+    end
+]
+
+!! Animacje: koniec daje zdarzenie EV_ANIM_DONE (a = okno, b = rodzaj).
+fun anim_move(h: Int, x: Int, y: Int, ms: Int, ease: Int) [
+    ffi_anim_move(h, x, y, ms, ease)
+    end
+]
+
+fun anim_fade(h: Int, to_permille: Int, ms: Int, ease: Int) [
+    ffi_anim_fade(h, to_permille, ms, ease)
+    end
+]
+
+fun anim_scale(h: Int, to_permille: Int, ms: Int, ease: Int) [
+    ffi_anim_scale(h, to_permille, ms, ease)
+    end
+]
+
+fun anim_cancel(h: Int) [
+    ffi_anim_cancel(h)
+    end
+]
+
+fun anim_active() -> Int [
+    end ffi_anim_active()
+]
+
+!! Pojawienie sie okna: wejscie z przezroczystosci i lekkiego powiekszenia.
+fun anim_open(h: Int, ms: Int) [
+    ffi_window_set_alpha(h, 0)
+    ffi_window_set_scale(h, 900)
+    ffi_anim_fade(h, 1000, ms, EASE_OUT)
+    ffi_anim_scale(h, 1000, ms, EASE_OUT)
+    end
+]
