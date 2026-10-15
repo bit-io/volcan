@@ -1,0 +1,133 @@
+include <ffi>
+include <ffi_ext>
+include <input>
+include <text>
+
+!! Kody klawiszy (linux/input-event-codes.h) uzupelniajace input.hcs.
+const KEY_1: Int = 2
+const KEY_2: Int = 3
+const KEY_3: Int = 4
+const KEY_4: Int = 5
+const KEY_5: Int = 6
+const KEY_6: Int = 7
+const KEY_7: Int = 8
+const KEY_8: Int = 9
+const KEY_9: Int = 10
+const KEY_0: Int = 11
+const KEY_MINUS: Int = 12
+const KEY_EQUAL: Int = 13
+const KEY_BACKSPACE: Int = 14
+const KEY_TAB: Int = 15
+const KEY_W: Int = 17
+const KEY_E: Int = 18
+const KEY_R: Int = 19
+const KEY_Y: Int = 21
+const KEY_U: Int = 22
+const KEY_I: Int = 23
+const KEY_O: Int = 24
+const KEY_P: Int = 25
+const KEY_B: Int = 48
+const KEY_N: Int = 49
+const KEY_A: Int = 30
+const KEY_S: Int = 31
+const KEY_D: Int = 32
+const KEY_F: Int = 33
+const KEY_H: Int = 35
+const KEY_J: Int = 36
+const KEY_K: Int = 37
+const KEY_L: Int = 38
+const KEY_Z: Int = 44
+const KEY_X: Int = 45
+const KEY_C: Int = 46
+const KEY_V: Int = 47
+const KEY_M: Int = 50
+const KEY_RIGHTSHIFT: Int = 54
+const KEY_F2: Int = 60
+const KEY_F3: Int = 61
+const KEY_F4: Int = 62
+const KEY_F5: Int = 63
+const KEY_F10: Int = 68
+const KEY_F11: Int = 87
+const KEY_F12: Int = 88
+const KEY_HOME: Int = 102
+const KEY_UP: Int = 103
+const KEY_PAGEUP: Int = 104
+const KEY_LEFT: Int = 105
+const KEY_RIGHT: Int = 106
+const KEY_END: Int = 107
+const KEY_DOWN: Int = 108
+const KEY_PAGEDOWN: Int = 109
+const KEY_DELETE: Int = 111
+
+!! Maski modyfikatorow (do mods_now / chord_is).
+const MOD_SHIFT: Int = 1
+const MOD_CTRL: Int = 2
+const MOD_ALT: Int = 4
+const MOD_SUPER: Int = 8
+
+!! Aktualnie wcisniete modyfikatory jako suma masek MOD_*.
+fun mods_now() -> Int [
+    let m = 0
+    if ffi_key_pressed(KEY_LEFTSHIFT) == 1 or ffi_key_pressed(KEY_RIGHTSHIFT) == 1 [
+        m = m + MOD_SHIFT
+    ]
+    if ffi_key_pressed(KEY_LEFTCTRL) == 1 or ffi_key_pressed(KEY_RIGHTCTRL) == 1 [
+        m = m + MOD_CTRL
+    ]
+    if ffi_key_pressed(KEY_LEFTALT) == 1 or ffi_key_pressed(KEY_RIGHTALT) == 1 [
+        m = m + MOD_ALT
+    ]
+    if ffi_key_pressed(KEY_LEFTMETA) == 1 or ffi_key_pressed(KEY_RIGHTMETA) == 1 [
+        m = m + MOD_SUPER
+    ]
+    end m
+]
+
+!! Czy dokladnie te modyfikatory (i zadne inne) sa teraz wcisniete.
+fun chord_is(mods: Int) -> Bool [
+    end mods_now() == mods
+]
+
+!! Modyfikatory ze stanu xkb (uwzglednia blokady i uklad): suma masek MOD_*.
+fun mods_xkb() -> Int [
+    end ffi_keyboard_mods()
+]
+
+!! Uklad klawiatury, np. keyboard_set_keymap("pl", "", "ctrl:nocaps"). Puste = domyslne.
+fun keyboard_set_keymap(layout: Str, variant: Str, options: Str) -> Bool [
+    ffi_buf_clear(0)
+    text_push(0, layout + "\n" + variant + "\n" + options)
+    end ffi_keyboard_set_keymap() == 1
+]
+
+fun keyboard_set_repeat(rate: Int, delay_ms: Int) [
+    ffi_keyboard_set_repeat(rate, delay_ms)
+    end
+]
+
+fun keyboard_repeat_rate() -> Int [
+    end ffi_keyboard_repeat_rate()
+]
+
+fun keyboard_repeat_delay() -> Int [
+    end ffi_keyboard_repeat_delay()
+]
+
+!! Wirtualna klawiatura: wstrzykuje zdarzenie klawisza do seata (jak fizyczny klawisz), np. dla
+!! ekranowej klawiatury kompozytora albo polecenia IPC `key`. Louvre nie ma protokolow
+!! virtual-keyboard ani text-input, wiec to dziala tylko wewnatrz kompozytora.
+fun keyboard_send_key(code: Int, pressed: Bool) [
+    if pressed [
+        ffi_keyboard_send_key(code, 1)
+    ] else [
+        ffi_keyboard_send_key(code, 0)
+    ]
+    end
+]
+
+!! Nacisniecie i puszczenie klawisza.
+fun keyboard_tap(code: Int) [
+    ffi_keyboard_send_key(code, 1)
+    ffi_keyboard_send_key(code, 0)
+    end
+]
