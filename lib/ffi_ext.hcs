@@ -1,0 +1,929 @@
+fun ffi_abi_min() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_abi_min() -> i64; }
+        out = unsafe { vcn_abi_min() };
+    ]
+    end out
+]
+
+fun ffi_abi_compatible(required: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_abi_compatible(required: i64) -> i64; }
+        out = unsafe { vcn_abi_compatible(required) };
+    ]
+    end out
+]
+
+fun ffi_features() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_features() -> i64; }
+        out = unsafe { vcn_features() };
+    ]
+    end out
+]
+
+fun ffi_dropped_events() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_dropped_events() -> i64; }
+        out = unsafe { vcn_dropped_events() };
+    ]
+    end out
+]
+
+fun ffi_last_code() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_last_code() -> i64; }
+        out = unsafe { vcn_last_code() };
+    ]
+    end out
+]
+
+fun ffi_clear_error() [
+    native {Rust} [
+        extern "C" { fn vcn_clear_error(); }
+        unsafe { vcn_clear_error() };
+    ]
+    end
+]
+
+fun ffi_thread_violations() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_thread_violations() -> i64; }
+        out = unsafe { vcn_thread_violations() };
+    ]
+    end out
+]
+
+fun ffi_thread_adopt() [
+    native {Rust} [
+        extern "C" { fn vcn_thread_adopt(); }
+        unsafe { vcn_thread_adopt() };
+    ]
+    end
+]
+
+fun ffi_last_error() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_last_error() -> i64; }
+        out = unsafe { vcn_last_error() };
+    ]
+    end out
+]
+
+fun ffi_ev_utf8() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_ev_utf8() -> i64; }
+        out = unsafe { vcn_ev_utf8() };
+    ]
+    end out
+]
+
+fun ffi_popup_dismiss(h: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_popup_dismiss(h: i64); }
+        unsafe { vcn_popup_dismiss(h) };
+    ]
+    end
+]
+
+fun ffi_popup_is_topmost(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_popup_is_topmost(h: i64) -> i64; }
+        out = unsafe { vcn_popup_is_topmost(h) };
+    ]
+    end out
+]
+
+fun ffi_popup_x(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_popup_x(h: i64) -> i64; }
+        out = unsafe { vcn_popup_x(h) };
+    ]
+    end out
+]
+
+fun ffi_popup_y(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_popup_y(h: i64) -> i64; }
+        out = unsafe { vcn_popup_y(h) };
+    ]
+    end out
+]
+
+fun ffi_popup_width(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_popup_width(h: i64) -> i64; }
+        out = unsafe { vcn_popup_width(h) };
+    ]
+    end out
+]
+
+fun ffi_popup_height(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_popup_height(h: i64) -> i64; }
+        out = unsafe { vcn_popup_height(h) };
+    ]
+    end out
+]
+
+fun ffi_popup_configure_rect(h: Int, x: Int, y: Int, w: Int, hh: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_popup_configure_rect(h: i64, x: i64, y: i64, w: i64, hh: i64); }
+        unsafe { vcn_popup_configure_rect(h, x, y, w, hh) };
+    ]
+    end
+]
+
+fun ffi_layer_layer(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_layer_layer(h: i64) -> i64; }
+        out = unsafe { vcn_layer_layer(h) };
+    ]
+    end out
+]
+
+fun ffi_layer_anchor(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_layer_anchor(h: i64) -> i64; }
+        out = unsafe { vcn_layer_anchor(h) };
+    ]
+    end out
+]
+
+fun ffi_layer_exclusive_zone(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_layer_exclusive_zone(h: i64) -> i64; }
+        out = unsafe { vcn_layer_exclusive_zone(h) };
+    ]
+    end out
+]
+
+fun ffi_layer_margin_top(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_layer_margin_top(h: i64) -> i64; }
+        out = unsafe { vcn_layer_margin_top(h) };
+    ]
+    end out
+]
+
+fun ffi_layer_margin_right(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_layer_margin_right(h: i64) -> i64; }
+        out = unsafe { vcn_layer_margin_right(h) };
+    ]
+    end out
+]
+
+fun ffi_layer_margin_bottom(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_layer_margin_bottom(h: i64) -> i64; }
+        out = unsafe { vcn_layer_margin_bottom(h) };
+    ]
+    end out
+]
+
+fun ffi_layer_margin_left(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_layer_margin_left(h: i64) -> i64; }
+        out = unsafe { vcn_layer_margin_left(h) };
+    ]
+    end out
+]
+
+fun ffi_layer_interactivity(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_layer_interactivity(h: i64) -> i64; }
+        out = unsafe { vcn_layer_interactivity(h) };
+    ]
+    end out
+]
+
+fun ffi_layer_width(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_layer_width(h: i64) -> i64; }
+        out = unsafe { vcn_layer_width(h) };
+    ]
+    end out
+]
+
+fun ffi_layer_height(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_layer_height(h: i64) -> i64; }
+        out = unsafe { vcn_layer_height(h) };
+    ]
+    end out
+]
+
+fun ffi_layer_close(h: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_layer_close(h: i64); }
+        unsafe { vcn_layer_close(h) };
+    ]
+    end
+]
+
+fun ffi_layer_configure_size(h: Int, w: Int, hh: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_layer_configure_size(h: i64, w: i64, hh: i64); }
+        unsafe { vcn_layer_configure_size(h, w, hh) };
+    ]
+    end
+]
+
+fun ffi_keyboard_repeat_rate() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_keyboard_repeat_rate() -> i64; }
+        out = unsafe { vcn_keyboard_repeat_rate() };
+    ]
+    end out
+]
+
+fun ffi_keyboard_repeat_delay() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_keyboard_repeat_delay() -> i64; }
+        out = unsafe { vcn_keyboard_repeat_delay() };
+    ]
+    end out
+]
+
+fun ffi_keyboard_set_repeat(rate: Int, delay_ms: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_keyboard_set_repeat(rate: i64, delay_ms: i64); }
+        unsafe { vcn_keyboard_set_repeat(rate, delay_ms) };
+    ]
+    end
+]
+
+fun ffi_keyboard_mods() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_keyboard_mods() -> i64; }
+        out = unsafe { vcn_keyboard_mods() };
+    ]
+    end out
+]
+
+fun ffi_clipboard_set_allow(allow: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_clipboard_set_allow(allow: i64); }
+        unsafe { vcn_clipboard_set_allow(allow) };
+    ]
+    end
+]
+
+fun ffi_dnd_cancel() [
+    native {Rust} [
+        extern "C" { fn vcn_dnd_cancel(); }
+        unsafe { vcn_dnd_cancel() };
+    ]
+    end
+]
+
+fun ffi_seat_set_idle_hint(idle: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_seat_set_idle_hint(idle: i64); }
+        unsafe { vcn_seat_set_idle_hint(idle) };
+    ]
+    end
+]
+
+fun ffi_seat_idle_hint() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_seat_idle_hint() -> i64; }
+        out = unsafe { vcn_seat_idle_hint() };
+    ]
+    end out
+]
+
+fun ffi_idle_inhibitor_count() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_idle_inhibitor_count() -> i64; }
+        out = unsafe { vcn_idle_inhibitor_count() };
+    ]
+    end out
+]
+
+fun ffi_session_lock_set_allow(allow: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_session_lock_set_allow(allow: i64); }
+        unsafe { vcn_session_lock_set_allow(allow) };
+    ]
+    end
+]
+
+fun ffi_session_lock_state() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_session_lock_state() -> i64; }
+        out = unsafe { vcn_session_lock_state() };
+    ]
+    end out
+]
+
+fun ffi_session_force_unlock() [
+    native {Rust} [
+        extern "C" { fn vcn_session_force_unlock(); }
+        unsafe { vcn_session_force_unlock() };
+    ]
+    end
+]
+
+fun ffi_output_gamma_size(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_output_gamma_size(h: i64) -> i64; }
+        out = unsafe { vcn_output_gamma_size(h) };
+    ]
+    end out
+]
+
+fun ffi_output_set_gamma_scale(h: Int, r_permille: Int, g_permille: Int, b_permille: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_output_set_gamma_scale(h: i64, r_permille: i64, g_permille: i64, b_permille: i64) -> i64; }
+        out = unsafe { vcn_output_set_gamma_scale(h, r_permille, g_permille, b_permille) };
+    ]
+    end out
+]
+
+fun ffi_style_enable(on: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_style_enable(on: i64); }
+        unsafe { vcn_style_enable(on) };
+    ]
+    end
+]
+
+fun ffi_style_background(argb: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_style_background(argb: i64); }
+        unsafe { vcn_style_background(argb) };
+    ]
+    end
+]
+
+fun ffi_style_border(width: Int, active_argb: Int, inactive_argb: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_style_border(width: i64, active_argb: i64, inactive_argb: i64); }
+        unsafe { vcn_style_border(width, active_argb, inactive_argb) };
+    ]
+    end
+]
+
+fun ffi_style_radius(radius: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_style_radius(radius: i64); }
+        unsafe { vcn_style_radius(radius) };
+    ]
+    end
+]
+
+fun ffi_style_shadow(radius: Int, dx: Int, dy: Int, argb: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_style_shadow(radius: i64, dx: i64, dy: i64, argb: i64); }
+        unsafe { vcn_style_shadow(radius, dx, dy, argb) };
+    ]
+    end
+]
+
+fun ffi_overlay_clear() [
+    native {Rust} [
+        extern "C" { fn vcn_overlay_clear(); }
+        unsafe { vcn_overlay_clear() };
+    ]
+    end
+]
+
+fun ffi_overlay_clear_group(group: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_overlay_clear_group(group: i64); }
+        unsafe { vcn_overlay_clear_group(group) };
+    ]
+    end
+]
+
+fun ffi_overlay_count() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_overlay_count() -> i64; }
+        out = unsafe { vcn_overlay_count() };
+    ]
+    end out
+]
+
+fun ffi_overlay_rect_g(group: Int, x: Int, y: Int, w: Int, h: Int, argb: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_overlay_rect_g(group: i64, x: i64, y: i64, w: i64, h: i64, argb: i64) -> i64; }
+        out = unsafe { vcn_overlay_rect_g(group, x, y, w, h, argb) };
+    ]
+    end out
+]
+
+fun ffi_overlay_rect(x: Int, y: Int, w: Int, h: Int, argb: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_overlay_rect(x: i64, y: i64, w: i64, h: i64, argb: i64) -> i64; }
+        out = unsafe { vcn_overlay_rect(x, y, w, h, argb) };
+    ]
+    end out
+]
+
+fun ffi_overlay_text(group: Int, x: Int, y: Int, size: Int, argb: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_overlay_text(group: i64, x: i64, y: i64, size: i64, argb: i64) -> i64; }
+        out = unsafe { vcn_overlay_text(group, x, y, size, argb) };
+    ]
+    end out
+]
+
+fun ffi_deco_enable(mode: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_deco_enable(mode: i64); }
+        unsafe { vcn_deco_enable(mode) };
+    ]
+    end
+]
+
+fun ffi_deco_style(bar_h: Int, font_px: Int, bg_active: Int, bg_inactive: Int, fg_active: Int, fg_inactive: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_deco_style(bar_h: i64, font_px: i64, bg_active: i64, bg_inactive: i64, fg_active: i64, fg_inactive: i64); }
+        unsafe { vcn_deco_style(bar_h, font_px, bg_active, bg_inactive, fg_active, fg_inactive) };
+    ]
+    end
+]
+
+fun ffi_deco_buttons(size: Int, gap: Int, close_argb: Int, max_argb: Int, min_argb: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_deco_buttons(size: i64, gap: i64, close_argb: i64, max_argb: i64, min_argb: i64); }
+        unsafe { vcn_deco_buttons(size, gap, close_argb, max_argb, min_argb) };
+    ]
+    end
+]
+
+fun ffi_deco_font() [
+    native {Rust} [
+        extern "C" { fn vcn_deco_font(); }
+        unsafe { vcn_deco_font() };
+    ]
+    end
+]
+
+fun ffi_deco_bar_height() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_deco_bar_height() -> i64; }
+        out = unsafe { vcn_deco_bar_height() };
+    ]
+    end out
+]
+
+fun ffi_deco_hit_handle(x: Float, y: Float) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_deco_hit_handle(x: f64, y: f64) -> i64; }
+        out = unsafe { vcn_deco_hit_handle(x, y) };
+    ]
+    end out
+]
+
+fun ffi_deco_hit_part(x: Float, y: Float) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_deco_hit_part(x: f64, y: f64) -> i64; }
+        out = unsafe { vcn_deco_hit_part(x, y) };
+    ]
+    end out
+]
+
+fun ffi_wallpaper_set(mode: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_wallpaper_set(mode: i64) -> i64; }
+        out = unsafe { vcn_wallpaper_set(mode) };
+    ]
+    end out
+]
+
+fun ffi_wallpaper_clear() [
+    native {Rust} [
+        extern "C" { fn vcn_wallpaper_clear(); }
+        unsafe { vcn_wallpaper_clear() };
+    ]
+    end
+]
+
+fun ffi_window_set_alpha(h: Int, permille: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_window_set_alpha(h: i64, permille: i64); }
+        unsafe { vcn_window_set_alpha(h, permille) };
+    ]
+    end
+]
+
+fun ffi_window_set_scale(h: Int, permille: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_window_set_scale(h: i64, permille: i64); }
+        unsafe { vcn_window_set_scale(h, permille) };
+    ]
+    end
+]
+
+fun ffi_window_set_border(h: Int, argb: Int, enabled: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_window_set_border(h: i64, argb: i64, enabled: i64); }
+        unsafe { vcn_window_set_border(h, argb, enabled) };
+    ]
+    end
+]
+
+fun ffi_anim_move(h: Int, x: Int, y: Int, ms: Int, ease: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_anim_move(h: i64, x: i64, y: i64, ms: i64, ease: i64); }
+        unsafe { vcn_anim_move(h, x, y, ms, ease) };
+    ]
+    end
+]
+
+fun ffi_anim_fade(h: Int, to_permille: Int, ms: Int, ease: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_anim_fade(h: i64, to_permille: i64, ms: i64, ease: i64); }
+        unsafe { vcn_anim_fade(h, to_permille, ms, ease) };
+    ]
+    end
+]
+
+fun ffi_anim_scale(h: Int, to_permille: Int, ms: Int, ease: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_anim_scale(h: i64, to_permille: i64, ms: i64, ease: i64); }
+        unsafe { vcn_anim_scale(h, to_permille, ms, ease) };
+    ]
+    end
+]
+
+fun ffi_anim_cancel(h: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_anim_cancel(h: i64); }
+        unsafe { vcn_anim_cancel(h) };
+    ]
+    end
+]
+
+fun ffi_anim_active() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_anim_active() -> i64; }
+        out = unsafe { vcn_anim_active() };
+    ]
+    end out
+]
+
+fun ffi_cursor_set_shape(shape: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_cursor_set_shape(shape: i64); }
+        unsafe { vcn_cursor_set_shape(shape) };
+    ]
+    end
+]
+
+fun ffi_cursor_set_theme() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_cursor_set_theme() -> i64; }
+        out = unsafe { vcn_cursor_set_theme() };
+    ]
+    end out
+]
+
+fun ffi_cursor_set_image(hot_x: Int, hot_y: Int, size: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_cursor_set_image(hot_x: i64, hot_y: i64, size: i64) -> i64; }
+        out = unsafe { vcn_cursor_set_image(hot_x, hot_y, size) };
+    ]
+    end out
+]
+
+fun ffi_cursor_reset() [
+    native {Rust} [
+        extern "C" { fn vcn_cursor_reset(); }
+        unsafe { vcn_cursor_reset() };
+    ]
+    end
+]
+
+fun ffi_keyboard_send_key(code: Int, pressed: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_keyboard_send_key(code: i64, pressed: i64); }
+        unsafe { vcn_keyboard_send_key(code, pressed) };
+    ]
+    end
+]
+
+fun ffi_output_mirror(dst: Int, src: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_output_mirror(dst: i64, src: i64); }
+        unsafe { vcn_output_mirror(dst, src) };
+    ]
+    end
+]
+
+fun ffi_output_mirror_of(dst: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_output_mirror_of(dst: i64) -> i64; }
+        out = unsafe { vcn_output_mirror_of(dst) };
+    ]
+    end out
+]
+
+fun ffi_output_set_blank(h: Int, blank: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_output_set_blank(h: i64, blank: i64); }
+        unsafe { vcn_output_set_blank(h, blank) };
+    ]
+    end
+]
+
+fun ffi_output_is_blank(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_output_is_blank(h: i64) -> i64; }
+        out = unsafe { vcn_output_is_blank(h) };
+    ]
+    end out
+]
+
+fun ffi_output_screenshot(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_output_screenshot(h: i64) -> i64; }
+        out = unsafe { vcn_output_screenshot(h) };
+    ]
+    end out
+]
+
+fun ffi_layer_scope(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_layer_scope(h: i64) -> i64; }
+        out = unsafe { vcn_layer_scope(h) };
+    ]
+    end out
+]
+
+fun ffi_keyboard_set_keymap() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_keyboard_set_keymap() -> i64; }
+        out = unsafe { vcn_keyboard_set_keymap() };
+    ]
+    end out
+]
+
+fun ffi_buf_len(slot: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_buf_len(slot: i64) -> i64; }
+        out = unsafe { vcn_buf_len(slot) };
+    ]
+    end out
+]
+
+fun ffi_buf_at(slot: Int, i: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_buf_at(slot: i64, i: i64) -> i64; }
+        out = unsafe { vcn_buf_at(slot, i) };
+    ]
+    end out
+]
+
+fun ffi_config_clear() [
+    native {Rust} [
+        extern "C" { fn vcn_config_clear(); }
+        unsafe { vcn_config_clear() };
+    ]
+    end
+]
+
+fun ffi_config_count() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_config_count() -> i64; }
+        out = unsafe { vcn_config_count() };
+    ]
+    end out
+]
+
+fun ffi_config_load() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_config_load() -> i64; }
+        out = unsafe { vcn_config_load() };
+    ]
+    end out
+]
+
+fun ffi_config_lookup() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_config_lookup() -> i64; }
+        out = unsafe { vcn_config_lookup() };
+    ]
+    end out
+]
+
+fun ffi_config_lookup_int(def: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_config_lookup_int(def: i64) -> i64; }
+        out = unsafe { vcn_config_lookup_int(def) };
+    ]
+    end out
+]
+
+fun ffi_config_store() [
+    native {Rust} [
+        extern "C" { fn vcn_config_store(); }
+        unsafe { vcn_config_store() };
+    ]
+    end
+]
+
+fun ffi_ipc_set_mode(mode: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_ipc_set_mode(mode: i64); }
+        unsafe { vcn_ipc_set_mode(mode) };
+    ]
+    end
+]
+
+fun ffi_ipc_allow_uid(uid: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_ipc_allow_uid(uid: i64); }
+        unsafe { vcn_ipc_allow_uid(uid) };
+    ]
+    end
+]
+
+fun ffi_ipc_stat(which: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_ipc_stat(which: i64) -> i64; }
+        out = unsafe { vcn_ipc_stat(which) };
+    ]
+    end out
+]
+
+fun ffi_ipc_fd() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_ipc_fd() -> i64; }
+        out = unsafe { vcn_ipc_fd() };
+    ]
+    end out
+]
+
+fun ffi_ipc_poll() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_ipc_poll() -> i64; }
+        out = unsafe { vcn_ipc_poll() };
+    ]
+    end out
+]
+
+fun ffi_ipc_line() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_ipc_line() -> i64; }
+        out = unsafe { vcn_ipc_line() };
+    ]
+    end out
+]
+
+fun ffi_ipc_listen() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_ipc_listen() -> i64; }
+        out = unsafe { vcn_ipc_listen() };
+    ]
+    end out
+]
+
+fun ffi_ipc_reply() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_ipc_reply() -> i64; }
+        out = unsafe { vcn_ipc_reply() };
+    ]
+    end out
+]
+
+fun ffi_ipc_set_token() [
+    native {Rust} [
+        extern "C" { fn vcn_ipc_set_token(); }
+        unsafe { vcn_ipc_set_token() };
+    ]
+    end
+]
+
+fun ffi_ipc_close() [
+    native {Rust} [
+        extern "C" { fn vcn_ipc_close(); }
+        unsafe { vcn_ipc_close() };
+    ]
+    end
+]
+
+fun ffi_process_kill(pid: Int, sig: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_process_kill(pid: i64, sig: i64) -> i64; }
+        out = unsafe { vcn_process_kill(pid, sig) };
+    ]
+    end out
+]
+
+fun ffi_process_count() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_process_count() -> i64; }
+        out = unsafe { vcn_process_count() };
+    ]
+    end out
+]
+
+fun ffi_process_start() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_process_start() -> i64; }
+        out = unsafe { vcn_process_start() };
+    ]
+    end out
+]
+
+fun ffi_process_poll() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_process_poll() -> i64; }
+        out = unsafe { vcn_process_poll() };
+    ]
+    end out
+]
+
+fun ffi_process_status() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_process_status() -> i64; }
+        out = unsafe { vcn_process_status() };
+    ]
+    end out
+]
+
+fun ffi_file_write() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_file_write() -> i64; }
+        out = unsafe { vcn_file_write() };
+    ]
+    end out
+]
+
+fun ffi_file_read() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_file_read() -> i64; }
+        out = unsafe { vcn_file_read() };
+    ]
+    end out
+]
