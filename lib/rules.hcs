@@ -1,0 +1,133 @@
+include <strings>
+include <config>
+
+!! Reguly okien z konfiguracji. Klucze rule.1 .. rule.64:
+!!
+!!   rule.1 = app_id=pavucontrol => float
+!!   rule.2 = app_id=firefox title=*Nagrywanie* => workspace=3 sticky
+!!   rule.3 = app_id=org.gnome.* => output=2 maximize
+!!   rule.4 = title=Scratch* => scratchpad
+!!
+!! Przed `=>` warunki (app_id=WZORZEC, title=WZORZEC, oba musza pasowac; brak = dowolny), po `=>` akcje:
+!! float, tile, workspace=N (1..9), output=N (od 1), fullscreen, maximize, sticky, scratchpad.
+!! Wzorce: * dowolny ciag, ? dowolny znak; wartosci bez spacji. Pasujace reguly sumuja sie
+!! (pozniejsza nadpisuje wczesniejsza). Zgodnosc wsteczna: rules.float = lista app_id plywajacych.
+
+const RULES_MAX: Int = 64
+
+struct RuleAct [
+    matched: Bool,
+    floating: Int,
+    ws: Int,
+    out: Int,
+    fullscreen: Int,
+    maximize: Int,
+    sticky: Int,
+    scratch: Int
+]
+
+fun rule_none() -> RuleAct [
+    end RuleAct(false, -1, -1, -1, 0, 0, 0, 0)
+]
+
+!! Czy pojedyncza regula (tekst po `=`) pasuje do okna; actions: tekst akcji zapisany w `out_actions`.
+fun rule_matches(line: Str, app: Str, title: Str) -> Bool [
+    let words = str_words(line)
+    let i = 0
+    while i < words.len() [
+        let w = words[i].clone()
+        if w == "=>" [
+            end true
+        ]
+        let eq = str_find(w, "=", 0)
+        if eq > 0 [
+            let key = str_lower(str_sub(w, 0, eq))
+            let pat = str_sub(w, eq + 1, str_len(w))
+            if key == "app_id" and not glob_match(pat, app) [
+                end false
+            ]
+            if key == "title" and not glob_match(pat, title) [
+                end false
+            ]
+        ]
+        i = i + 1
+    ]
+    end false
+]
+
+!! Czesc po `=>` (albo "" gdy brak).
+fun rule_actions(line: Str) -> Str [
+    let pos = str_find(line, "=>", 0)
+    if pos < 0 [
+        end ""
+    ]
+    end str_trim(str_sub(line, pos + 2, str_len(line)))
+]
+
+fun rule_apply_actions(act: RuleAct, actions: Str) -> RuleAct [
+    let r = act.clone()
+    let words = str_words(actions)
+    let i = 0
+    while i < words.len() [
+        let w = str_lower(words[i].clone())
+        if w == "float" [
+            r.floating = 1
+        ]
+        if w == "tile" [
+            r.floating = 0
+        ]
+        if w == "fullscreen" [
+            r.fullscreen = 1
+        ]
+        if w == "maximize" [
+            r.maximize = 1
+        ]
+        if w == "sticky" [
+            r.sticky = 1
+        ]
+        if w == "scratchpad" [
+            r.scratch = 1
+        ]
+        if str_starts_with(w, "workspace=") [
+            let n = str_int(str_sub(w, 10, str_len(w)), 0)
+            if n >= 1 and n <= 9 [
+                r.ws = n - 1
+            ]
+        ]
+        if str_starts_with(w, "output=") [
+            let n = str_int(str_sub(w, 7, str_len(w)), 0)
+            if n >= 1 and n <= 16 [
+                r.out = n - 1
+            ]
+        ]
+        i = i + 1
+    ]
+    end r
+]
+
+!! Wynik wszystkich pasujacych regul dla okna o danym app_id i tytule.
+fun rules_match(app: Str, title: Str) -> RuleAct [
+    let act = rule_none()
+    if app != "" and config_list_has("rules.float", app) [
+        act.matched = true
+        act.floating = 1
+    ]
+    let n = 1
+    while n <= RULES_MAX [
+        let key = "rule." + (n as Str)
+        if config_has(key) [
+            let line = config_get(key, "")
+            let hit = false
+            let pos = str_find(line, "=>", 0)
+            if pos >= 0 [
+                hit = rule_matches(line, app, title)
+            ]
+            if hit [
+                act = rule_apply_actions(act, rule_actions(line))
+                act.matched = true
+            ]
+        ]
+        n = n + 1
+    ]
+    end act
+]
