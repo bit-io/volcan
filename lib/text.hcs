@@ -1,5 +1,14 @@
 include <ffi>
-get <std:string> import <str_chr>
+include <ffi_ext>
+
+!! Znak Unicode o kodzie `cp` jako Str (niepoprawny kod daje U+FFFD).
+fun text_chr(cp: Int) -> Str [
+    let out = ""
+    native {Rust} [
+        out = char::from_u32(cp as u32).unwrap_or('\u{FFFD}').to_string();
+    ]
+    end out
+]
 
 !! Dekoduje liste bajtow UTF-8 do Str.
 fun text_from_utf8(bytes: List<Int>) -> Str [
@@ -34,7 +43,7 @@ fun text_from_utf8(bytes: List<Int>) -> Str [
         if cp > 1114111 [
             cp = 65533
         ]
-        out = out + str_chr(cp)
+        out = out + text_chr(cp)
         i = i + step
     ]
     end out
@@ -54,7 +63,7 @@ fun text_push(slot: Int, s: Str) [
 
 !! Czyta napis z pary funkcji (dlugosc, bajt) - wspolna czesc getterow
 !! tytulu/app_id/nazwy wyjscia. `kind`: 0 tytul, 1 app_id, 2 nazwa wyjscia,
-!! 3 nazwa seata (wtedy `h` jest ignorowane).
+!! 3 nazwa seata, 4 zawartosc bufora 1 shima (wtedy `h` jest ignorowane).
 fun text_read(kind: Int, h: Int) -> Str [
     let n = 0
     if kind == 0 [
@@ -63,8 +72,10 @@ fun text_read(kind: Int, h: Int) -> Str [
         n = ffi_toplevel_app_id_len(h)
     ] elif kind == 2 [
         n = ffi_output_name_len(h)
-    ] else [
+    ] elif kind == 3 [
         n = ffi_seat_name_len()
+    ] else [
+        n = ffi_buf_len(1)
     ]
     let bytes: List<Int> = []
     let i = 0
@@ -76,8 +87,10 @@ fun text_read(kind: Int, h: Int) -> Str [
             b = ffi_toplevel_app_id_char(h, i)
         ] elif kind == 2 [
             b = ffi_output_name_char(h, i)
-        ] else [
+        ] elif kind == 3 [
             b = ffi_seat_name_char(i)
+        ] else [
+            b = ffi_buf_at(1, i)
         ]
         if b >= 0 [
             bytes.push(b)
