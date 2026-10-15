@@ -1,4 +1,5 @@
 include <ffi>
+include <ffi_ext>
 include <text>
 
 struct OutputInfo [
@@ -84,4 +85,118 @@ fun output_repaint_all() [
 
 fun output_info(h: Int) -> OutputInfo [
     end OutputInfo(h, text_read(2, h), ffi_output_x(h), ffi_output_y(h), ffi_output_width(h), ffi_output_height(h), ffi_output_scale(h))
+]
+
+!! Obszar uzytkowy wyjscia (bez stref zarezerwowanych, np. paskow) - uklad okien
+!! powinien trzymac sie tego prostokata.
+fun output_available_x(h: Int) -> Int [
+    end ffi_output_available_x(h)
+]
+
+fun output_available_y(h: Int) -> Int [
+    end ffi_output_available_y(h)
+]
+
+fun output_available_width(h: Int) -> Int [
+    end ffi_output_available_width(h)
+]
+
+fun output_available_height(h: Int) -> Int [
+    end ffi_output_available_height(h)
+]
+
+!! Transformacja wyjscia: 0 normalna, 1 obrot 90, 2 obrot 180, 3 obrot 270 (przeciwnie do ruchu wskazowek).
+fun output_transform(h: Int) -> Int [
+    end ffi_output_transform(h)
+]
+
+fun output_set_transform(h: Int, t: Int) [
+    ffi_output_set_transform(h, t)
+    end
+]
+
+struct OutputMode [
+    index: Int,
+    width: Int,
+    height: Int,
+    refresh_mhz: Int,
+    preferred: Bool
+]
+
+fun output_mode_count(h: Int) -> Int [
+    end ffi_output_mode_count(h)
+]
+
+!! Tryb o numerze `i` (0..output_mode_count-1). Odswiezanie w mHz (60000 = 60 Hz).
+fun output_mode(h: Int, i: Int) -> OutputMode [
+    end OutputMode(i, ffi_output_mode_width(h, i), ffi_output_mode_height(h, i), ffi_output_mode_refresh(h, i), ffi_output_mode_preferred(h, i) == 1)
+]
+
+!! Numer biezacego trybu albo -1.
+fun output_current_mode(h: Int) -> Int [
+    end ffi_output_current_mode(h)
+]
+
+fun output_set_mode(h: Int, i: Int) -> Bool [
+    end ffi_output_set_mode(h, i) == 1
+]
+
+!! Uklada wszystkie wyjscia w jednym rzedzie od lewej do prawej (wg kolejnosci output_list).
+fun output_arrange_row() [
+    let hs = output_list()
+    let x = 0
+    let i = 0
+    while i < hs.len() [
+        let h = hs[i]
+        output_set_pos(h, x, 0)
+        x = x + output_width(h)
+        i = i + 1
+    ]
+    end
+]
+
+!! Wyjscie zawierajace punkt globalny (x, y) albo 0.
+fun output_at_point(x: Int, y: Int) -> Int [
+    let hs = output_list()
+    let i = 0
+    while i < hs.len() [
+        let h = hs[i]
+        if x >= output_x(h) and x < output_x(h) + output_width(h) and y >= output_y(h) and y < output_y(h) + output_height(h) [
+            end h
+        ]
+        i = i + 1
+    ]
+    end 0
+]
+
+!! Lustro: wyjscie `dst` pokazuje obraz wyjscia `src` (z zachowaniem proporcji); src = 0 konczy lustro.
+!! Wymaga style_enable(true) (rysowanie przez kompozytor).
+fun output_mirror(dst: Int, src: Int) [
+    ffi_output_mirror(dst, src)
+    end
+]
+
+fun output_mirror_of(dst: Int) -> Int [
+    end ffi_output_mirror_of(dst)
+]
+
+!! Miekkie wygaszenie (Louvre nie ma DPMS): czern + gamma 0, gdy wyjscie ja wspiera.
+fun output_blank(h: Int, blank: Bool) [
+    if blank [
+        ffi_output_set_blank(h, 1)
+    ] else [
+        ffi_output_set_blank(h, 0)
+    ]
+    end
+]
+
+fun output_is_blank(h: Int) -> Bool [
+    end ffi_output_is_blank(h) == 1
+]
+
+!! Zapisuje ostatnia klatke wyjscia jako PNG; false przy bledzie (compositor_last_error).
+fun output_screenshot(h: Int, path: Str) -> Bool [
+    ffi_buf_clear(0)
+    text_push(0, path)
+    end ffi_output_screenshot(h) == 1
 ]
