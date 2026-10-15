@@ -1,0 +1,55 @@
+include <ffi>
+include <ffi_ext>
+include <text>
+include <process>
+
+!! XWayland. Louvre wspiera tylko tryb ROOTFUL (README Louvre: "rootless mode is not supported"): Xwayland
+!! dziala jako zwykly klient Wayland i pokazuje caly pulpit X11 w jednym oknie. Dwie drogi:
+!!   * xwayland_start_rootful(display)  - uruchamia `Xwayland DISPLAY -rootful` (pakiet xorg-xwayland);
+!!     aplikacje X11 widac w jednym oknie "X11 desktop",
+!!   * xwayland_start(display, program) - np. "xwayland-satellite" (https://github.com/Supreeeme/xwayland-satellite):
+!!     zewnetrzny klient Wayland, ktory pokazuje kazde okno X11 jako osobne okno Wayland (jak rootless).
+!! W obu przypadkach ustawiamy DISPLAY dla klientow uruchamianych pozniej. Programy trzeba zainstalowac;
+!! to nie bylo testowane z prawdziwymi aplikacjami X11.
+
+struct Xwl [
+    pid: Int,
+    display: Str,
+    running: Bool
+]
+
+!! Uruchamia `program display` (domyslnie "xwayland-satellite" i ":1") i ustawia DISPLAY dla
+!! klientow uruchamianych pozniej. Zwraca stan; running = false, gdy start sie nie udal.
+fun xwayland_start(display: Str, program: Str) -> Xwl [
+    let pid = process_start(program + " " + display)
+    if pid <= 0 [
+        end Xwl(-1, display, false)
+    ]
+    env_set("DISPLAY", display, true)
+    end Xwl(pid, display, true)
+]
+
+!! Reakcja na EV_PROCESS_EXIT: gdy zakonczyl sie nasz proces, zaznacza to w stanie.
+fun xwayland_on_exit(x: Xwl, pid: Int) -> Xwl [
+    if pid == x.pid and x.running [
+        end Xwl(x.pid, x.display, false)
+    ]
+    end Xwl(x.pid, x.display, x.running)
+]
+
+fun xwayland_stop(x: Xwl) -> Xwl [
+    if x.running [
+        process_kill(x.pid, SIGTERM)
+    ]
+    end Xwl(x.pid, x.display, false)
+]
+
+!! Uruchamia `Xwayland DISPLAY -rootful` (tryb wspierany przez Louvre) i ustawia DISPLAY.
+fun xwayland_start_rootful(display: Str) -> Xwl [
+    let pid = process_start("Xwayland " + display + " -rootful")
+    if pid <= 0 [
+        end Xwl(-1, display, false)
+    ]
+    env_set("DISPLAY", display, true)
+    end Xwl(pid, display, true)
+]
