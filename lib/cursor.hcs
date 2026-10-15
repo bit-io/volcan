@@ -1,0 +1,102 @@
+include <ffi>
+include <ffi_ext>
+include <text>
+
+!! Ksztalt kursora: wartosci jak w protokole cursor-shape (1..34).
+const CURSOR_DEFAULT: Int = 1
+const CURSOR_CONTEXT_MENU: Int = 2
+const CURSOR_HELP: Int = 3
+const CURSOR_POINTER: Int = 4
+const CURSOR_PROGRESS: Int = 5
+const CURSOR_WAIT: Int = 6
+const CURSOR_CELL: Int = 7
+const CURSOR_CROSSHAIR: Int = 8
+const CURSOR_TEXT: Int = 9
+const CURSOR_VERTICAL_TEXT: Int = 10
+const CURSOR_ALIAS: Int = 11
+const CURSOR_COPY: Int = 12
+const CURSOR_MOVE: Int = 13
+const CURSOR_NO_DROP: Int = 14
+const CURSOR_NOT_ALLOWED: Int = 15
+const CURSOR_GRAB: Int = 16
+const CURSOR_GRABBING: Int = 17
+const CURSOR_RESIZE_RIGHT: Int = 18
+const CURSOR_RESIZE_TOP: Int = 19
+const CURSOR_RESIZE_TOP_RIGHT: Int = 20
+const CURSOR_RESIZE_TOP_LEFT: Int = 21
+const CURSOR_RESIZE_BOTTOM: Int = 22
+const CURSOR_RESIZE_BOTTOM_RIGHT: Int = 23
+const CURSOR_RESIZE_BOTTOM_LEFT: Int = 24
+const CURSOR_RESIZE_LEFT: Int = 25
+const CURSOR_RESIZE_HORIZONTAL: Int = 26
+const CURSOR_RESIZE_VERTICAL: Int = 27
+const CURSOR_ALL_SCROLL: Int = 32
+const CURSOR_ZOOM_IN: Int = 33
+const CURSOR_ZOOM_OUT: Int = 34
+
+fun cursor_shape(shape: Int) [
+    ffi_cursor_set_shape(shape)
+    end
+]
+
+!! Kursor z motywu (np. "left_ptr", "watch"); false, gdy motyw go nie ma.
+fun cursor_theme(name: Str) -> Bool [
+    ffi_buf_clear(0)
+    text_push(0, name)
+    end ffi_cursor_set_theme() == 1
+]
+
+!! Kursor z pliku obrazu; (hot_x, hot_y) to punkt aktywny, size - rozmiar docelowy w px.
+fun cursor_image(path: Str, hot_x: Int, hot_y: Int, size: Int) -> Bool [
+    ffi_buf_clear(0)
+    text_push(0, path)
+    end ffi_cursor_set_image(hot_x, hot_y, size) == 1
+]
+
+!! Wraca do kursora domyslnego i zasad klientow.
+fun cursor_reset() [
+    ffi_cursor_reset()
+    end
+]
+
+fun cursor_visible(visible: Bool) [
+    if visible [
+        ffi_cursor_set_visible(1)
+    ] else [
+        ffi_cursor_set_visible(0)
+    ]
+    end
+]
+
+!! Ksztalt kursora dla zmiany rozmiaru wg masy krawedzi EDGE_* (1 gora, 2 dol, 4 lewa, 8 prawa).
+fun cursor_for_edges(edges: Int) -> Int [
+    let top = edges % 2 >= 1
+    let bottom = edges % 4 >= 2
+    let left = edges % 8 >= 4
+    let right = edges % 16 >= 8
+    if top and left [
+        end CURSOR_RESIZE_TOP_LEFT
+    ]
+    if top and right [
+        end CURSOR_RESIZE_TOP_RIGHT
+    ]
+    if bottom and left [
+        end CURSOR_RESIZE_BOTTOM_LEFT
+    ]
+    if bottom and right [
+        end CURSOR_RESIZE_BOTTOM_RIGHT
+    ]
+    if top [
+        end CURSOR_RESIZE_TOP
+    ]
+    if bottom [
+        end CURSOR_RESIZE_BOTTOM
+    ]
+    if left [
+        end CURSOR_RESIZE_LEFT
+    ]
+    if right [
+        end CURSOR_RESIZE_RIGHT
+    ]
+    end CURSOR_DEFAULT
+]
