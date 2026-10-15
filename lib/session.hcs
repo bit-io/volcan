@@ -1,0 +1,89 @@
+include <ffi>
+include <ffi_ext>
+include <output>
+include <text>
+
+!! Sesja i seat: blokada ekranu, bezczynnosc, schowek, DND, gamma.
+
+const SESSION_UNLOCKED: Int = 0
+const SESSION_LOCKED: Int = 1
+const SESSION_DEAD_LOCKED: Int = 2
+
+!! Czy pozwalac klientom (np. swaylock) na blokade sesji. Domyslnie tak.
+fun session_lock_allow(allow: Bool) [
+    if allow [
+        ffi_session_lock_set_allow(1)
+    ] else [
+        ffi_session_lock_set_allow(0)
+    ]
+    end
+]
+
+fun session_lock_state() -> Int [
+    end ffi_session_lock_state()
+]
+
+fun session_locked() -> Bool [
+    end ffi_session_lock_state() != SESSION_UNLOCKED
+]
+
+!! Awaryjne odblokowanie (np. gdy klient blokady zginal).
+fun session_force_unlock() [
+    ffi_session_force_unlock()
+    end
+]
+
+!! Czy pozwalac na ustawienie schowka przez klienty. Domyslnie tak.
+fun clipboard_allow(allow: Bool) [
+    if allow [
+        ffi_clipboard_set_allow(1)
+    ] else [
+        ffi_clipboard_set_allow(0)
+    ]
+    end
+]
+
+fun dnd_cancel() [
+    ffi_dnd_cancel()
+    end
+]
+
+!! Podpowiedz bezczynnosci uzytkownika dla klientow (idle-notify).
+fun idle_hint(idle: Bool) [
+    if idle [
+        ffi_seat_set_idle_hint(1)
+    ] else [
+        ffi_seat_set_idle_hint(0)
+    ]
+    end
+]
+
+!! Czy jakis klient blokuje bezczynnosc (np. odtwarzacz wideo).
+fun idle_inhibited() -> Bool [
+    end ffi_idle_inhibitor_count() > 0
+]
+
+!! Skala kanalow gamma w promilach (1000 = bez zmian); zwraca false, gdy wyjscie nie wspiera gamma.
+fun output_gamma_scale(h: Int, r: Int, g: Int, b: Int) -> Bool [
+    end ffi_output_set_gamma_scale(h, r, g, b) == 1
+]
+
+!! Filtr swiatla nocnego: sila 0..100 (0 = wylaczony).
+fun output_night_light(h: Int, strength: Int) -> Bool [
+    let s = strength
+    if s < 0 [
+        s = 0
+    ]
+    if s > 100 [
+        s = 100
+    ]
+    end output_gamma_scale(h, 1000, 1000 - s * 2, 1000 - s * 5)
+]
+
+!! Uruchamia program (`sh -c`) z ustawionym WAYLAND_DISPLAY kompozytora; zwraca false przy bledzie.
+!! To samo co compositor_spawn, ale bez zaleznosci od modulu compositor (przydatne w testach).
+fun spawn_program(command: Str) -> Bool [
+    ffi_buf_clear(0)
+    text_push(0, command)
+    end ffi_spawn() == 1
+]
