@@ -1,4 +1,6 @@
 include <ffi>
+include <ffi_ext>
+include <text>
 
 const EV_NONE: Int = 0
 const EV_SURFACE_CREATED: Int = 1
@@ -17,13 +19,44 @@ const EV_MINIMIZE_REQUEST: Int = 13
 const EV_UNMINIMIZE_REQUEST: Int = 14
 const EV_CLOSE_REQUEST: Int = 15
 const EV_ACTIVATE_REQUEST: Int = 16
+const EV_POPUP_CONFIGURE: Int = 17
+const EV_POPUP_GRAB: Int = 18
 const EV_OUTPUT_PLUGGED: Int = 20
 const EV_OUTPUT_UNPLUGGED: Int = 21
 const EV_POINTER_MOVE: Int = 30
 const EV_POINTER_BUTTON: Int = 31
 const EV_KEY: Int = 32
+const EV_POINTER_AXIS: Int = 33
 const EV_ACTIVE_TOPLEVEL: Int = 40
 const EV_SURFACE_ROLE: Int = 50
+const EV_LAYER_CHANGED: Int = 51
+const EV_TOUCH_DOWN: Int = 70
+const EV_TOUCH_MOVE: Int = 71
+const EV_TOUCH_UP: Int = 72
+const EV_TOUCH_FRAME: Int = 73
+const EV_TOUCH_CANCEL: Int = 74
+const EV_SWIPE_BEGIN: Int = 80
+const EV_SWIPE_UPDATE: Int = 81
+const EV_SWIPE_END: Int = 82
+const EV_PINCH_BEGIN: Int = 83
+const EV_PINCH_UPDATE: Int = 84
+const EV_PINCH_END: Int = 85
+const EV_HOLD_BEGIN: Int = 86
+const EV_HOLD_END: Int = 87
+const EV_CLIPBOARD_REQUEST: Int = 90
+const EV_DND_START: Int = 91
+const EV_DND_CANCELLED: Int = 92
+const EV_DND_DROPPED: Int = 93
+const EV_SESSION_LOCK_REQUEST: Int = 95
+const EV_SESSION_LOCK_STATE: Int = 96
+const EV_PROCESS_EXIT: Int = 97
+const EV_ANIM_DONE: Int = 98
+
+!! Zrodla przewijania w EV_POINTER_AXIS (pole a).
+const AXIS_WHEEL: Int = 0
+const AXIS_FINGER: Int = 1
+const AXIS_CONTINUOUS: Int = 2
+const AXIS_WHEEL_TILT: Int = 3
 
 !! Maski krawedzi w EV_RESIZE_REQUEST (pole b).
 const EDGE_TOP: Int = 1
@@ -37,22 +70,32 @@ const EDGE_RIGHT: Int = 8
 !!   EV_SURFACE_ROLE: b = rola (patrz surface.hcs, ROLE_*)
 !!   EV_OUTPUT_*: a = uchwyt wyjscia
 !!   EV_POINTER_MOVE: x, y = delta; EV_POINTER_BUTTON: a = przycisk, b = 1 wcisniety / 0 puszczony
-!!   EV_KEY: a = kod klawisza (linux input), b = 1 wcisniety / 0 puszczony
+!!   EV_KEY: a = kod klawisza (linux input), b = 1 wcisniety / 0 puszczony, c = keysym XKB
+!!   EV_POINTER_AXIS: a = zrodlo (AXIS_*), b/c = kroki dyskretne x/y, x, y = przewiniecie
+!!   EV_KEY (nacisniecie): ev_text() daje utf8 klawisza
+!!   EV_POPUP_*, EV_LAYER_CHANGED: a = uchwyt powierzchni
+!!   EV_TOUCH_DOWN/MOVE: a = id punktu, x, y = pozycja; EV_TOUCH_UP: a = id
+!!   EV_SWIPE_UPDATE/EV_PINCH_UPDATE: x, y = delta; *_END i EV_HOLD_END: a = 1 gdy anulowane
+!!   EV_CLIPBOARD_REQUEST, EV_SESSION_LOCK_REQUEST: a = uchwyt klienta
+!!   EV_SESSION_LOCK_STATE: a = 0 odblokowana, 1 zablokowana, 2 klient zginal
+!!   EV_PROCESS_EXIT: a = pid procesu uruchomionego przez process_start, b = kod wyjscia (128+sygnal)
+!!   EV_ANIM_DONE: a = okno, b = rodzaj animacji (0 pozycja, 1 krycie, 2 skala)
 !!   EV_ACTIVE_TOPLEVEL: a = uchwyt nowej aktywnej powierzchni albo 0
 struct Event [
     kind: Int,
     a: Int,
     b: Int,
     x: Float,
-    y: Float
+    y: Float,
+    c: Int
 ]
 
 !! Pobiera nastepne zdarzenie; gdy kolejka pusta, zwraca Event z kind == EV_NONE.
 fun event_next() -> Event [
     if ffi_poll() == 0 [
-        end Event(0, 0, 0, 0.0, 0.0)
+        end Event(0, 0, 0, 0.0, 0.0, 0)
     ]
-    end Event(ffi_ev_kind(), ffi_ev_a(), ffi_ev_b(), ffi_ev_x(), ffi_ev_y())
+    end Event(ffi_ev_kind(), ffi_ev_a(), ffi_ev_b(), ffi_ev_x(), ffi_ev_y(), ffi_ev_c())
 ]
 
 !! Czytelna nazwa rodzaju zdarzenia (do logow).
@@ -123,6 +166,81 @@ fun event_name(kind: Int) -> Str [
     if kind == EV_KEY [
         end "key"
     ]
+    if kind == EV_POINTER_AXIS [
+        end "pointer_axis"
+    ]
+    if kind == EV_POPUP_CONFIGURE [
+        end "popup_configure"
+    ]
+    if kind == EV_POPUP_GRAB [
+        end "popup_grab"
+    ]
+    if kind == EV_LAYER_CHANGED [
+        end "layer_changed"
+    ]
+    if kind == EV_TOUCH_DOWN [
+        end "touch_down"
+    ]
+    if kind == EV_TOUCH_MOVE [
+        end "touch_move"
+    ]
+    if kind == EV_TOUCH_UP [
+        end "touch_up"
+    ]
+    if kind == EV_TOUCH_FRAME [
+        end "touch_frame"
+    ]
+    if kind == EV_TOUCH_CANCEL [
+        end "touch_cancel"
+    ]
+    if kind == EV_SWIPE_BEGIN [
+        end "swipe_begin"
+    ]
+    if kind == EV_SWIPE_UPDATE [
+        end "swipe_update"
+    ]
+    if kind == EV_SWIPE_END [
+        end "swipe_end"
+    ]
+    if kind == EV_PINCH_BEGIN [
+        end "pinch_begin"
+    ]
+    if kind == EV_PINCH_UPDATE [
+        end "pinch_update"
+    ]
+    if kind == EV_PINCH_END [
+        end "pinch_end"
+    ]
+    if kind == EV_HOLD_BEGIN [
+        end "hold_begin"
+    ]
+    if kind == EV_HOLD_END [
+        end "hold_end"
+    ]
+    if kind == EV_CLIPBOARD_REQUEST [
+        end "clipboard_request"
+    ]
+    if kind == EV_DND_START [
+        end "dnd_start"
+    ]
+    if kind == EV_DND_CANCELLED [
+        end "dnd_cancelled"
+    ]
+    if kind == EV_DND_DROPPED [
+        end "dnd_dropped"
+    ]
+    if kind == EV_SESSION_LOCK_REQUEST [
+        end "session_lock_request"
+    ]
+    if kind == EV_SESSION_LOCK_STATE [
+        end "session_lock_state"
+    ]
+    if kind == EV_PROCESS_EXIT [
+        end "process_exit"
+    ]
+    if kind == EV_ANIM_DONE [
+        end "anim_done"
+    ]
     if kind == EV_ACTIVE_TOPLEVEL [
         end "active_toplevel"
     ]
@@ -130,4 +248,10 @@ fun event_name(kind: Int) -> Str [
         end "surface_role"
     ]
     end "unknown"
+]
+
+!! Tekst (utf8) ostatnio odczytanego zdarzenia EV_KEY; pusty dla klawiszy bez znaku.
+fun ev_text() -> Str [
+    ffi_ev_utf8()
+    end text_read(4, 0)
 ]
