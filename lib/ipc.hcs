@@ -1,0 +1,59 @@
+include <ffi>
+include <ffi_ext>
+include <text>
+
+!! IPC przez gniazdo UNIX: jedna linia polecenia na polaczenie, odpowiedz jedna linia.
+!! Klient: `printf 'focus next\n' | nc -U $XDG_RUNTIME_DIR/volcan.sock`.
+!!
+!!   ipc_listen(sciezka)
+!!   w petli: if ipc_poll() [ let cmd = ipc_line() ... ipc_reply("ok") ]
+
+fun ipc_listen(path: Str) -> Bool [
+    ffi_buf_clear(0)
+    text_push(0, path)
+    end ffi_ipc_listen() == 1
+]
+
+!! Czy przyszlo nowe polecenie (odczytaj ipc_line, potem koniecznie ipc_reply).
+fun ipc_poll() -> Bool [
+    end ffi_ipc_poll() == 1
+]
+
+fun ipc_line() -> Str [
+    ffi_ipc_line()
+    end text_read(4, 0)
+]
+
+fun ipc_reply(text: Str) -> Bool [
+    ffi_buf_clear(0)
+    text_push(0, text)
+    end ffi_ipc_reply() == 1
+]
+
+fun ipc_close() [
+    ffi_ipc_close()
+    end
+]
+
+!! n-te (od 0) slowo linii rozdzielonej spacjami; pusty napis, gdy brak.
+fun ipc_word(line: Str, n: Int) -> Str [
+    let len = line.len()
+    let i = 0
+    let idx = 0
+    while i < len [
+        while i < len and line.slice(i, i + 1) == " " [
+            i = i + 1
+        ]
+        let start = i
+        while i < len and line.slice(i, i + 1) != " " [
+            i = i + 1
+        ]
+        if i > start [
+            if idx == n [
+                end line.slice(start, i)
+            ]
+            idx = idx + 1
+        ]
+    ]
+    end ""
+]
