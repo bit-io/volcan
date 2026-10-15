@@ -10,13 +10,82 @@ fun volcan_shim_link() -> Int [
         #include <CZ/Louvre/Seat/LOutput.h>
         #include <CZ/Louvre/Roles/LSurface.h>
         #include <CZ/Louvre/Roles/LToplevelRole.h>
+        #include <CZ/Louvre/Seat/LOutputMode.h>
+        #include <CZ/Core/Events/CZPointerMoveEvent.h>
+        #include <CZ/Core/Events/CZPointerButtonEvent.h>
+        #include <CZ/Core/Events/CZPointerScrollEvent.h>
+        #include <CZ/Core/Events/CZKeyboardKeyEvent.h>
         #include <cstdint>
         #include <cstdlib>
         #include <deque>
+        #include <memory>
+        #include <vector>
         #include <string>
         #include <unistd.h>
         #include <sys/types.h>
         #include <sys/wait.h>
+        #include <sys/stat.h>
+        #include <sys/types.h>
+        #include <signal.h>
+        #include <mutex>
+        #include <thread>
+        #include <deque>
+        #include <sys/socket.h>
+        #include <sys/un.h>
+        #include <fcntl.h>
+        #include <poll.h>
+        #include <errno.h>
+        #include <cstring>
+        #include <cstdio>
+        #include <map>
+        #include <chrono>
+        #include <algorithm>
+        #include <xkbcommon/xkbcommon.h>
+        #include <xkbcommon/xkbcommon-names.h>
+        #include <CZ/Louvre/Roles/LPopupRole.h>
+        #include <CZ/Louvre/Roles/LLayerRole.h>
+        #include <CZ/Louvre/Roles/LSubsurfaceRole.h>
+        #include <CZ/Louvre/Roles/LDNDIconRole.h>
+        #include <CZ/Louvre/Roles/LSessionLockRole.h>
+        #include <CZ/Louvre/Seat/LTouch.h>
+        #include <CZ/Louvre/Seat/LClipboard.h>
+        #include <CZ/Louvre/Seat/LDND.h>
+        #include <CZ/Louvre/Manager/LSessionLockManager.h>
+        #include <CZ/Core/Events/CZTouchDownEvent.h>
+        #include <CZ/Core/Events/CZTouchMoveEvent.h>
+        #include <CZ/Core/Events/CZTouchUpEvent.h>
+        #include <CZ/Core/Events/CZTouchFrameEvent.h>
+        #include <CZ/Core/Events/CZTouchCancelEvent.h>
+        #include <CZ/Core/Events/CZPointerSwipeBeginEvent.h>
+        #include <CZ/Core/Events/CZPointerSwipeUpdateEvent.h>
+        #include <CZ/Core/Events/CZPointerSwipeEndEvent.h>
+        #include <CZ/Core/Events/CZPointerPinchBeginEvent.h>
+        #include <CZ/Core/Events/CZPointerPinchUpdateEvent.h>
+        #include <CZ/Core/Events/CZPointerPinchEndEvent.h>
+        #include <CZ/Core/Events/CZPointerHoldBeginEvent.h>
+        #include <CZ/Core/Events/CZPointerHoldEndEvent.h>
+        #include <CZ/Ream/RSurface.h>
+        #include <CZ/Ream/RPass.h>
+        #include <CZ/Ream/RPainter.h>
+        #include <CZ/Ream/RGammaLUT.h>
+        #include <CZ/Ream/RCore.h>
+        #include <CZ/Ream/RDevice.h>
+        #include <CZ/Louvre/Cursor/LCursorSource.h>
+        #include <CZ/Louvre/Cursor/LCursor.h>
+        #include <CZ/skia/core/SkCanvas.h>
+        #include <CZ/skia/core/SkPaint.h>
+        #include <CZ/skia/core/SkImage.h>
+        #include <CZ/skia/core/SkRRect.h>
+        #include <CZ/skia/core/SkFont.h>
+        #include <CZ/skia/core/SkFontMgr.h>
+        #include <CZ/skia/core/SkTypeface.h>
+        #include <CZ/skia/core/SkMaskFilter.h>
+        #include <CZ/skia/core/SkBlurTypes.h>
+        #include <CZ/Louvre/Cursor/LShapeCursorSource.h>
+        #include <CZ/Louvre/Cursor/LImageCursorSource.h>
+        #include <CZ/skia/ports/SkFontMgr_fontconfig.h>
+        #include <drm_fourcc.h>
+        #include <cmath>
         }
 
         using namespace CZ;
@@ -30,25 +99,160 @@ fun volcan_shim_link() -> Int [
             int64_t b;
             double x;
             double y;
+            int64_t c;
+            std::string s;
         };
 
         std::deque<Ev> g_queue;
-        Ev g_cur { 0, 0, 0, 0.0, 0.0 };
+        Ev g_cur { 0, 0, 0, 0.0, 0.0, 0, std::string() };
+        int64_t g_dropped = 0;
+        std::string g_last_error;
         bool g_manual { false };
         std::string g_buf0;
         std::string g_buf1;
 
-        void push(int64_t kind, int64_t a = 0, int64_t b = 0, double x = 0.0, double y = 0.0)
+        void push(int64_t kind, int64_t a = 0, int64_t b = 0, double x = 0.0, double y = 0.0, int64_t c = 0, const std::string &text = std::string())
         {
             if (g_queue.size() >= 8192)
+            {
                 g_queue.pop_front();
-            g_queue.push_back(Ev { kind, a, b, x, y });
+                g_dropped++;
+            }
+            g_queue.push_back(Ev { kind, a, b, x, y, c, text });
         }
 
         int64_t H(const void *p)
         {
             return (int64_t)(intptr_t)p;
         }
+
+
+        // ---- kontrakt jednowatkowy i kody bledow ----
+        // Kazda funkcja vcn_* dotykajaca Louvre musi byc wolana z jednego watku ("wlasciciela"):
+        // tego, ktory pierwszy wywolal taka funkcje (zwykle vcn_init). Inny watek dostaje wartosc
+        // domyslna, kod VCN_E_THREAD i zwiekszony licznik naruszen - zamiast wyscigu danych.
+        enum VcnCode
+        {
+            VCN_OK = 0,
+            VCN_E_THREAD = 1,
+            VCN_E_HANDLE = 2,
+            VCN_E_STATE = 3,
+            VCN_E_ARG = 4,
+            VCN_E_UNSUPPORTED = 5,
+            VCN_E_IO = 6,
+            VCN_E_DENIED = 7
+        };
+
+        int64_t g_code = 0;
+        int64_t g_thread_violations = 0;
+        std::thread::id g_owner;
+        bool g_owner_set = false;
+
+        void set_error(int64_t code, const char *msg)
+        {
+            g_code = code;
+            g_last_error = msg;
+        }
+
+        bool thread_ok()
+        {
+            const std::thread::id me = std::this_thread::get_id();
+            if (!g_owner_set)
+            {
+                g_owner = me;
+                g_owner_set = true;
+                return true;
+            }
+            if (me == g_owner)
+                return true;
+            g_thread_violations++;
+            g_code = VCN_E_THREAD;
+            g_last_error = "wywolanie vcn_* z innego watku niz wlasciciel (patrz vcn_thread_adopt)";
+            return false;
+        }
+
+        // ---- stan: styl rysowania, nakladki, polityki ----
+        struct OverlayRect
+        {
+            int64_t x, y, w, h;
+            uint32_t argb;
+            int64_t group;
+        };
+
+        struct OverlayText
+        {
+            int64_t x, y, size;
+            uint32_t argb;
+            std::string text;
+            int64_t group;
+        };
+
+        // Dekoracje po stronie serwera: tryb 0 brak, 1 wszystkie toplevele, 2 tylko gdy klient przyjal SSD.
+        struct Deco
+        {
+            int64_t mode { 0 };
+            int64_t bar_h { 28 };
+            int64_t font_px { 14 };
+            uint32_t bg_active { 0xFF2B2F3A };
+            uint32_t bg_inactive { 0xFF1E2028 };
+            uint32_t fg_active { 0xFFE6E6E6 };
+            uint32_t fg_inactive { 0xFF8A8F9B };
+            int64_t btn_size { 14 };
+            int64_t btn_gap { 8 };
+            uint32_t btn_close { 0xFFE5534B };
+            uint32_t btn_max { 0xFF4CAF50 };
+            uint32_t btn_min { 0xFFE5B80B };
+            std::string font_family { "sans-serif" };
+        };
+
+        struct Style
+        {
+            bool enabled { false };
+            uint32_t background { 0xFF00356B };
+            int64_t border { 0 };
+            uint32_t border_active { 0xFF4C9AFF };
+            uint32_t border_inactive { 0xFF333333 };
+            int64_t radius { 0 };
+            int64_t shadow_radius { 0 };
+            int64_t shadow_dx { 0 };
+            int64_t shadow_dy { 6 };
+            uint32_t shadow_color { 0x80000000 };
+            Deco deco;
+            std::shared_ptr<RImage> wall_image;
+            int64_t wall_mode { 1 };
+            std::vector<OverlayRect> overlays;
+            std::vector<OverlayText> texts;
+        };
+
+        Style g_style;
+
+        // Stan rysowania pojedynczego okna (krycie, skala, wlasny kolor ramki) - klucz: uchwyt powierzchni.
+        struct WinState
+        {
+            double alpha { 1.0 };
+            double scale { 1.0 };
+            bool has_border { false };
+            uint32_t border { 0 };
+        };
+
+        std::map<int64_t, WinState> g_win;
+        std::map<int64_t, int64_t> g_mirror;   // wyjscie docelowe -> zrodlowe
+        std::map<int64_t, bool> g_blank;       // wyjscia wygaszone
+
+        // Animacje: rodzaj 0 pozycja, 1 krycie, 2 skala.
+        struct Anim
+        {
+            int64_t h;
+            int kind;
+            double x0, y0, x1, y1;
+            std::chrono::steady_clock::time_point t0;
+            int64_t dur;
+            int ease;
+        };
+
+        std::vector<Anim> g_anims;
+        bool g_clip_allow { true };
+        bool g_lock_allow { true };
 
         // ---- podklasy fabryczne: tylko doklejaja zdarzenia, zachowanie bazowe zostaje ----
 
@@ -216,6 +420,60 @@ fun volcan_shim_link() -> Int [
                 push(31, (int64_t)e.button, e.pressed ? 1 : 0);
                 LPointer::pointerButtonEvent(e);
             }
+
+            void pointerScrollEvent(const CZPointerScrollEvent &e) override
+            {
+                push(33, (int64_t)e.source, (int64_t)e.axesDiscrete.x(), (double)e.axes.x(), (double)e.axes.y(), (int64_t)e.axesDiscrete.y());
+                LPointer::pointerScrollEvent(e);
+            }
+
+            void pointerSwipeBeginEvent(const CZPointerSwipeBeginEvent &e) override
+            {
+                push(80);
+                LPointer::pointerSwipeBeginEvent(e);
+            }
+
+            void pointerSwipeUpdateEvent(const CZPointerSwipeUpdateEvent &e) override
+            {
+                push(81, 0, 0, (double)e.delta.x(), (double)e.delta.y());
+                LPointer::pointerSwipeUpdateEvent(e);
+            }
+
+            void pointerSwipeEndEvent(const CZPointerSwipeEndEvent &e) override
+            {
+                push(82, e.cancelled ? 1 : 0);
+                LPointer::pointerSwipeEndEvent(e);
+            }
+
+            void pointerPinchBeginEvent(const CZPointerPinchBeginEvent &e) override
+            {
+                push(83);
+                LPointer::pointerPinchBeginEvent(e);
+            }
+
+            void pointerPinchUpdateEvent(const CZPointerPinchUpdateEvent &e) override
+            {
+                push(84, 0, 0, (double)e.delta.x(), (double)e.delta.y());
+                LPointer::pointerPinchUpdateEvent(e);
+            }
+
+            void pointerPinchEndEvent(const CZPointerPinchEndEvent &e) override
+            {
+                push(85, e.cancelled ? 1 : 0);
+                LPointer::pointerPinchEndEvent(e);
+            }
+
+            void pointerHoldBeginEvent(const CZPointerHoldBeginEvent &e) override
+            {
+                push(86);
+                LPointer::pointerHoldBeginEvent(e);
+            }
+
+            void pointerHoldEndEvent(const CZPointerHoldEndEvent &e) override
+            {
+                push(87, e.cancelled ? 1 : 0);
+                LPointer::pointerHoldEndEvent(e);
+            }
         };
 
         class VKeyboard : public LKeyboard
@@ -225,8 +483,515 @@ fun volcan_shim_link() -> Int [
 
             void keyEvent(const CZKeyboardKeyEvent &e) override
             {
-                push(32, (int64_t)e.code, e.isPressed ? 1 : 0);
+                push(32, (int64_t)e.code, e.isPressed ? 1 : 0, 0.0, 0.0, (int64_t)e.symbol, e.isPressed ? std::string(e.utf8) : std::string());
                 LKeyboard::keyEvent(e);
+            }
+        };
+
+        class VPopup : public LPopupRole
+        {
+        public:
+            VPopup(const void *params) noexcept : LPopupRole(params) {}
+
+            void configureRequest() override
+            {
+                if (!g_manual)
+                    LPopupRole::configureRequest();
+                push(17, H(surface()));
+            }
+
+            void grabKeyboardRequest(const CZEvent &e) override
+            {
+                if (!g_manual)
+                    LPopupRole::grabKeyboardRequest(e);
+                push(18, H(surface()));
+            }
+        };
+
+        class VLayer : public LLayerRole
+        {
+        public:
+            VLayer(const void *params) noexcept : LLayerRole(params) {}
+
+            void stateChanged(CZBitset<Changes> changes, const State &prev) noexcept override
+            {
+                LLayerRole::stateChanged(changes, prev);
+                push(51, H(surface()));
+            }
+        };
+
+        class VTouch : public LTouch
+        {
+        public:
+            VTouch(const void *params) noexcept : LTouch(params) {}
+
+            void touchDownEvent(const CZTouchDownEvent &e) override
+            {
+                push(70, (int64_t)LTouch::GetTouchEventId(e), 0, (double)e.pos.x(), (double)e.pos.y());
+                LTouch::touchDownEvent(e);
+            }
+
+            void touchMoveEvent(const CZTouchMoveEvent &e) override
+            {
+                push(71, (int64_t)LTouch::GetTouchEventId(e), 0, (double)e.pos.x(), (double)e.pos.y());
+                LTouch::touchMoveEvent(e);
+            }
+
+            void touchUpEvent(const CZTouchUpEvent &e) override
+            {
+                push(72, (int64_t)LTouch::GetTouchEventId(e));
+                LTouch::touchUpEvent(e);
+            }
+
+            void touchFrameEvent(const CZTouchFrameEvent &e) override
+            {
+                push(73);
+                LTouch::touchFrameEvent(e);
+            }
+
+            void touchCancelEvent(const CZTouchCancelEvent &e) override
+            {
+                push(74);
+                LTouch::touchCancelEvent(e);
+            }
+        };
+
+        class VClipboard : public LClipboard
+        {
+        public:
+            VClipboard(const void *params) noexcept : LClipboard(params) {}
+
+            bool setClipboardRequest(LClient *client, const CZEvent &e) override
+            {
+                push(90, H(client));
+                if (!g_clip_allow)
+                    return false;
+                return LClipboard::setClipboardRequest(client, e);
+            }
+        };
+
+        class VDND : public LDND
+        {
+        public:
+            VDND(const void *params) noexcept : LDND(params) {}
+
+            void startDragRequest() override
+            {
+                push(91);
+                LDND::startDragRequest();
+            }
+
+            void cancelled() override
+            {
+                push(92);
+                LDND::cancelled();
+            }
+
+            void dropped() override
+            {
+                push(93);
+                LDND::dropped();
+            }
+        };
+
+        class VSessionLock : public LSessionLockManager
+        {
+        public:
+            VSessionLock(const void *params) noexcept : LSessionLockManager(params) {}
+
+            bool lockRequest(LClient *client) override
+            {
+                push(95, H(client));
+                if (!g_lock_allow)
+                    return false;
+                return LSessionLockManager::lockRequest(client);
+            }
+
+            void stateChanged() override
+            {
+                LSessionLockManager::stateChanged();
+                push(96, (int64_t)state());
+            }
+        };
+
+        // ---- wlasne rysowanie przez SkCanvas (wlaczane przez vcn_style_enable) ----
+        // Tlo/tapeta, cienie, zaokraglone rogi, ramki, paski tytulowe z tekstem, nakladki, animacje.
+        // Wspolrzedne sa globalne (geometria przejscia mapuje viewport wyjscia na jego obraz).
+        sk_sp<SkTypeface> v_typeface()
+        {
+            static sk_sp<SkFontMgr> mgr;
+            static sk_sp<SkTypeface> tf;
+            static std::string family;
+            if (!mgr)
+                mgr = SkFontMgr_New_FontConfig(nullptr);
+            if (!tf || family != g_style.deco.font_family)
+            {
+                family = g_style.deco.font_family;
+                if (mgr)
+                {
+                    tf = mgr->matchFamilyStyle(family.c_str(), SkFontStyle::Normal());
+                    if (!tf)
+                        tf = mgr->matchFamilyStyle(nullptr, SkFontStyle::Normal());
+                }
+            }
+            return tf;
+        }
+
+        void v_text(SkCanvas *c, const std::string &text, SkScalar x, SkScalar y, int64_t px, uint32_t argb, double alpha)
+        {
+            sk_sp<SkTypeface> tf = v_typeface();
+            if (!tf || text.empty())
+                return;
+            SkFont font(tf, (SkScalar)px);
+            font.setSubpixel(true);
+            SkPaint p;
+            p.setAntiAlias(true);
+            p.setColor((SkColor)argb);
+            p.setAlphaf(p.getAlphaf() * (float)alpha);
+            c->drawString(text.c_str(), x, y, font, p);
+        }
+
+        SkIRect v_window_rect(LSurface *s)
+        {
+            const SkIPoint pos = s->rolePos();
+            if (LToplevelRole *t = s->toplevel())
+            {
+                const SkIRect g = t->windowGeometry();
+                return SkIRect::MakeXYWH(pos.x() + g.x(), pos.y() + g.y(), g.width(), g.height());
+            }
+            return SkIRect::MakePtSize(pos, s->size());
+        }
+
+        // Geometria paska tytulowego i przyciskow okna; false, gdy okno nie jest dekorowane.
+        struct DecoGeom
+        {
+            SkIRect body, bar, close, maxi, mini;
+        };
+
+        bool deco_geom(LSurface *s, DecoGeom &g)
+        {
+            LToplevelRole *t = s->toplevel();
+            if (!t || g_style.deco.mode == 0 || !s->mapped() || t->isFullscreen() || t->isMinimized())
+                return false;
+            if (g_style.deco.mode == 2 && t->decorationMode() != LToplevelRole::ServerSide)
+                return false;
+            g.body = v_window_rect(s);
+            const int32_t bh = (int32_t)g_style.deco.bar_h;
+            g.bar = SkIRect::MakeXYWH(g.body.x(), g.body.y() - bh, g.body.width(), bh);
+            const int32_t sz = (int32_t)g_style.deco.btn_size;
+            const int32_t gap = (int32_t)g_style.deco.btn_gap;
+            const int32_t y = g.bar.y() + (bh - sz) / 2;
+            int32_t x = g.bar.right() - gap - sz;
+            g.close = SkIRect::MakeXYWH(x, y, sz, sz);
+            x -= gap + sz;
+            g.maxi = SkIRect::MakeXYWH(x, y, sz, sz);
+            x -= gap + sz;
+            g.mini = SkIRect::MakeXYWH(x, y, sz, sz);
+            return true;
+        }
+
+        WinState *win_state(LSurface *s)
+        {
+            auto it = g_win.find(H(s));
+            return it == g_win.end() ? nullptr : &it->second;
+        }
+
+        void v_clip_rrect(SkRRect &rr, const SkRect &r, double rad, bool top_round)
+        {
+            const SkScalar k = (SkScalar)rad;
+            const SkVector radii[4] = { { top_round ? k : 0, top_round ? k : 0 }, { top_round ? k : 0, top_round ? k : 0 }, { k, k }, { k, k } };
+            rr.setRectRadii(r, radii);
+        }
+
+        void v_draw_surface(SkCanvas *c, LSurface *s, double alpha)
+        {
+            for (LOutput *o : compositor()->outputs())
+            {
+                if (SkIRect::Intersects(o->rect(), SkIRect::MakePtSize(s->rolePos(), s->size())))
+                    s->sendOutputEnterEvent(o);
+                else
+                    s->sendOutputLeaveEvent(o);
+            }
+            sk_sp<SkImage> img = s->image() ? s->image()->skImage() : nullptr;
+            if (img)
+            {
+                const SkRect dst = SkRect::Make(SkIRect::MakePtSize(s->rolePos(), s->size()));
+                SkRect src = s->srcRect();
+                const SkScalar sc = (SkScalar)s->scale();
+                src = SkRect::MakeLTRB(src.left() * sc, src.top() * sc, src.right() * sc, src.bottom() * sc);
+                SkPaint p;
+                p.setAntiAlias(true);
+                p.setAlphaf((float)alpha);
+                c->drawImageRect(img, src, dst, SkSamplingOptions(SkFilterMode::kLinear), &p, SkCanvas::kFast_SrcRectConstraint);
+            }
+            s->requestNextFrame();
+        }
+
+        void v_draw_subsurfaces(SkCanvas *c, const std::vector<LSubsurfaceRole *> &subs, double alpha)
+        {
+            for (auto *sub : subs)
+            {
+                if (!sub->surface()->mapped())
+                    continue;
+                v_draw_subsurfaces(c, sub->surface()->subsurfacesBelow(), alpha);
+                v_draw_surface(c, sub->surface(), alpha);
+                v_draw_subsurfaces(c, sub->surface()->subsurfacesAbove(), alpha);
+            }
+        }
+
+        // Cien, pasek tytulowy (z tekstem i przyciskami) i ramka toplevela.
+        void v_draw_decorations(SkCanvas *c, LSurface *s, LToplevelRole *t, double alpha)
+        {
+            DecoGeom g {};
+            const bool decorated = deco_geom(s, g);
+            SkIRect full = decorated ? SkIRect::MakeLTRB(g.bar.left(), g.bar.top(), g.body.right(), g.body.bottom()) : v_window_rect(s);
+            const bool active = compositor()->seat()->activeToplevel() == t;
+            const double rad = (double)g_style.radius;
+            SkRRect frame;
+            v_clip_rrect(frame, SkRect::Make(full), rad, true);
+
+            if (g_style.shadow_radius > 0)
+            {
+                SkPaint sp;
+                sp.setAntiAlias(true);
+                sp.setColor((SkColor)g_style.shadow_color);
+                sp.setAlphaf(sp.getAlphaf() * (float)alpha);
+                sp.setMaskFilter(SkMaskFilter::MakeBlur(kNormal_SkBlurStyle, (SkScalar)g_style.shadow_radius / 2.f));
+                SkRRect shadow;
+                v_clip_rrect(shadow, SkRect::Make(full).makeOffset((SkScalar)g_style.shadow_dx, (SkScalar)g_style.shadow_dy), rad, true);
+                c->drawRRect(shadow, sp);
+            }
+
+            if (decorated)
+            {
+                SkPaint bp;
+                bp.setAntiAlias(true);
+                bp.setColor((SkColor)(active ? g_style.deco.bg_active : g_style.deco.bg_inactive));
+                bp.setAlphaf(bp.getAlphaf() * (float)alpha);
+                SkRRect bar;
+                v_clip_rrect(bar, SkRect::Make(g.bar), rad, true);
+                const SkVector flat[4] = { { (SkScalar)rad, (SkScalar)rad }, { (SkScalar)rad, (SkScalar)rad }, { 0, 0 }, { 0, 0 } };
+                bar.setRectRadii(SkRect::Make(g.bar), flat);
+                c->drawRRect(bar, bp);
+
+                const int64_t px = g_style.deco.font_px;
+                c->save();
+                c->clipRect(SkRect::MakeLTRB((SkScalar)g.bar.left() + 8, (SkScalar)g.bar.top(), (SkScalar)g.mini.left() - 8, (SkScalar)g.bar.bottom()));
+                v_text(c, std::string(t->title()), (SkScalar)g.bar.left() + 12, (SkScalar)g.bar.top() + (SkScalar)(g_style.deco.bar_h + px) / 2.f - 2.f, px,
+                       active ? g_style.deco.fg_active : g_style.deco.fg_inactive, alpha);
+                c->restore();
+
+                const struct { SkIRect r; uint32_t col; } btn[3] = { { g.close, g_style.deco.btn_close }, { g.maxi, g_style.deco.btn_max }, { g.mini, g_style.deco.btn_min } };
+                for (const auto &b : btn)
+                {
+                    SkPaint cp;
+                    cp.setAntiAlias(true);
+                    cp.setColor((SkColor)b.col);
+                    cp.setAlphaf(cp.getAlphaf() * (float)alpha * (active ? 1.f : 0.55f));
+                    c->drawCircle((SkScalar)(b.r.left() + b.r.right()) / 2.f, (SkScalar)(b.r.top() + b.r.bottom()) / 2.f, (SkScalar)b.r.width() / 2.f, cp);
+                }
+            }
+
+            if (g_style.border > 0)
+            {
+                WinState *ws = win_state(s);
+                SkPaint op;
+                op.setAntiAlias(true);
+                op.setStyle(SkPaint::kStroke_Style);
+                op.setStrokeWidth((SkScalar)g_style.border);
+                op.setColor((SkColor)((ws && ws->has_border) ? ws->border : (active ? g_style.border_active : g_style.border_inactive)));
+                op.setAlphaf(op.getAlphaf() * (float)alpha);
+                SkRRect outline;
+                v_clip_rrect(outline, SkRect::Make(full).makeOutset((SkScalar)g_style.border / 2.f, (SkScalar)g_style.border / 2.f), rad + (double)g_style.border / 2.0, true);
+                c->drawRRect(outline, op);
+            }
+        }
+
+        void v_draw_tree(SkCanvas *c, LSurface *s)
+        {
+            if (!s->mapped() || (s->toplevel() && s->toplevel()->isMinimized()))
+                return;
+
+            LToplevelRole *t = s->toplevel();
+            WinState *ws = win_state(s);
+            const double alpha = ws ? ws->alpha : 1.0;
+            const double scale = ws ? ws->scale : 1.0;
+
+            c->save();
+            if (t && scale > 0.01 && std::abs(scale - 1.0) > 0.001)
+            {
+                const SkIRect r = v_window_rect(s);
+                const SkScalar cx = (SkScalar)(r.left() + r.right()) / 2.f, cy = (SkScalar)(r.top() + r.bottom()) / 2.f;
+                c->translate(cx, cy);
+                c->scale((SkScalar)scale, (SkScalar)scale);
+                c->translate(-cx, -cy);
+            }
+
+            if (t)
+                v_draw_decorations(c, s, t, alpha);
+
+            if (t && g_style.radius > 0)
+            {
+                DecoGeom g {};
+                const bool decorated = deco_geom(s, g);
+                SkRRect body;
+                v_clip_rrect(body, SkRect::Make(v_window_rect(s)), (double)g_style.radius, !decorated);
+                const SkVector bottom[4] = { { 0, 0 }, { 0, 0 }, { (SkScalar)g_style.radius, (SkScalar)g_style.radius }, { (SkScalar)g_style.radius, (SkScalar)g_style.radius } };
+                if (decorated)
+                    body.setRectRadii(SkRect::Make(v_window_rect(s)), bottom);
+                c->save();
+                c->clipRRect(body, true);
+                v_draw_subsurfaces(c, s->subsurfacesBelow(), alpha);
+                v_draw_surface(c, s, alpha);
+                v_draw_subsurfaces(c, s->subsurfacesAbove(), alpha);
+                c->restore();
+            }
+            else
+            {
+                v_draw_subsurfaces(c, s->subsurfacesBelow(), alpha);
+                v_draw_surface(c, s, alpha);
+                v_draw_subsurfaces(c, s->subsurfacesAbove(), alpha);
+            }
+            c->restore();
+
+            if (t)
+            {
+                for (auto *child : t->childPopups())
+                    v_draw_tree(c, child->surface());
+                for (auto *child : t->childToplevels())
+                    v_draw_tree(c, child->surface());
+            }
+            else if (auto *popup = s->popup())
+            {
+                for (auto *child : popup->childPopups())
+                    v_draw_tree(c, child->surface());
+            }
+            else if (auto *layerRole = s->layerRole())
+            {
+                for (auto *child : layerRole->childPopups())
+                    v_draw_tree(c, child->surface());
+            }
+        }
+
+        void v_draw_wallpaper(SkCanvas *c, const SkRect &out)
+        {
+            if (!g_style.wall_image)
+                return;
+            sk_sp<SkImage> img = g_style.wall_image->skImage();
+            if (!img)
+                return;
+            const SkScalar iw = (SkScalar)img->width(), ih = (SkScalar)img->height();
+            SkRect src = SkRect::MakeWH(iw, ih), dst = out;
+            const SkScalar ar = out.width() / out.height(), ir = iw / ih;
+            if (g_style.wall_mode == 1)          // wypelnij (przytnij)
+            {
+                if (ir > ar)
+                {
+                    const SkScalar w = ih * ar;
+                    src = SkRect::MakeXYWH((iw - w) / 2.f, 0, w, ih);
+                }
+                else
+                {
+                    const SkScalar h = iw / ar;
+                    src = SkRect::MakeXYWH(0, (ih - h) / 2.f, iw, h);
+                }
+            }
+            else if (g_style.wall_mode == 2)     // dopasuj (pasy)
+            {
+                if (ir > ar)
+                {
+                    const SkScalar h = out.width() / ir;
+                    dst = SkRect::MakeXYWH(out.left(), out.top() + (out.height() - h) / 2.f, out.width(), h);
+                }
+                else
+                {
+                    const SkScalar w = out.height() * ir;
+                    dst = SkRect::MakeXYWH(out.left() + (out.width() - w) / 2.f, out.top(), w, out.height());
+                }
+            }
+            else if (g_style.wall_mode == 3)     // srodek, bez skalowania
+                dst = SkRect::MakeXYWH(out.left() + (out.width() - iw) / 2.f, out.top() + (out.height() - ih) / 2.f, iw, ih);
+            SkPaint p;
+            p.setAntiAlias(true);
+            c->drawImageRect(img, src, dst, SkSamplingOptions(SkFilterMode::kLinear), &p, SkCanvas::kFast_SrcRectConstraint);
+        }
+
+        class VOutput : public LOutput
+        {
+        public:
+            VOutput(const void *params) noexcept : LOutput(params) {}
+
+            void paintGL() override
+            {
+                const bool blank = g_blank.count(H(this)) != 0;
+                LOutput *mirror = nullptr;
+                auto mit = g_mirror.find(H(this));
+                if (mit != g_mirror.end())
+                {
+                    for (LOutput *o : compositor()->outputs())
+                        if (H(o) == mit->second)
+                            mirror = o;
+                }
+                if (!g_style.enabled && !blank && !mirror)
+                {
+                    LOutput::paintGL();
+                    return;
+                }
+
+                auto surface { RSurface::WrapImage(image()) };
+                const SkRect viewport = SkRect::Make(mirror ? mirror->rect() : rect());
+                SkRect dstr = SkRect::Make(image()->size());
+                if (mirror)
+                {
+                    const SkScalar k = std::min(dstr.width() / viewport.width(), dstr.height() / viewport.height());
+                    const SkScalar w = viewport.width() * k, h = viewport.height() * k;
+                    dstr = SkRect::MakeXYWH((dstr.width() - w) / 2.f, (dstr.height() - h) / 2.f, w, h);
+                }
+                surface->setGeometry({ .viewport = viewport, .dst = dstr, .transform = transform() });
+
+                auto pass { surface->beginPass(RPassCap_SkCanvas) };
+                SkCanvas *c { pass->getCanvas() };
+                if (blank)
+                {
+                    c->clear(SK_ColorBLACK);
+                    return;
+                }
+                c->clear(mirror ? SK_ColorBLACK : (SkColor)g_style.background);
+                v_draw_wallpaper(c, viewport);
+
+                if (sessionLockManager()->state() != LSessionLockManager::Unlocked)
+                {
+                    if (sessionLockRole())
+                        v_draw_tree(c, sessionLockRole()->surface());
+                    return;
+                }
+
+                if (seat()->dnd()->icon())
+                    seat()->dnd()->icon()->surface()->raise();
+
+                for (const auto &layer : compositor()->layers())
+                {
+                    for (LSurface *s : layer)
+                    {
+                        if (s->parent())
+                            continue;
+                        if (s->cursorRole())
+                        {
+                            s->requestNextFrame();
+                            continue;
+                        }
+                        v_draw_tree(c, s);
+                    }
+                }
+
+                for (const OverlayRect &o : g_style.overlays)
+                {
+                    SkPaint p;
+                    p.setColor((SkColor)o.argb);
+                    c->drawRect(SkRect::MakeXYWH((SkScalar)o.x, (SkScalar)o.y, (SkScalar)o.w, (SkScalar)o.h), p);
+                }
+                for (const OverlayText &o : g_style.texts)
+                    v_text(c, o.text, (SkScalar)o.x, (SkScalar)o.y, o.size, o.argb, 1.0);
             }
         };
 
@@ -247,6 +1012,20 @@ fun volcan_shim_link() -> Int [
                     return new VPointer(params);
                 case LFactoryObject::Type::LKeyboard:
                     return new VKeyboard(params);
+                case LFactoryObject::Type::LPopupRole:
+                    return new VPopup(params);
+                case LFactoryObject::Type::LLayerRole:
+                    return new VLayer(params);
+                case LFactoryObject::Type::LTouch:
+                    return new VTouch(params);
+                case LFactoryObject::Type::LClipboard:
+                    return new VClipboard(params);
+                case LFactoryObject::Type::LDND:
+                    return new VDND(params);
+                case LFactoryObject::Type::LSessionLockManager:
+                    return new VSessionLock(params);
+                case LFactoryObject::Type::LOutput:
+                    return new VOutput(params);
                 default:
                     return nullptr;
                 }
@@ -263,7 +1042,7 @@ fun volcan_shim_link() -> Int [
 
         // ---- walidacja uchwytow: uchwyt musi nalezec do zywego obiektu ----
 
-        LSurface *surf(int64_t h)
+        LSurface *surf_quiet(int64_t h)
         {
             if (!g_comp || h == 0)
                 return nullptr;
@@ -273,13 +1052,21 @@ fun volcan_shim_link() -> Int [
             return nullptr;
         }
 
+        LSurface *surf(int64_t h)
+        {
+            LSurface *s = surf_quiet(h);
+            if (!s && h != 0)
+                set_error(VCN_E_HANDLE, "nieprawidlowy uchwyt powierzchni");
+            return s;
+        }
+
         LToplevelRole *top(int64_t h)
         {
             LSurface *s = surf(h);
             return s ? s->toplevel() : nullptr;
         }
 
-        LOutput *outp(int64_t h)
+        LOutput *outp_quiet(int64_t h)
         {
             if (!g_comp || h == 0)
                 return nullptr;
@@ -287,6 +1074,14 @@ fun volcan_shim_link() -> Int [
                 if (H(o) == h)
                     return o;
             return nullptr;
+        }
+
+        LOutput *outp(int64_t h)
+        {
+            LOutput *o = outp_quiet(h);
+            if (!o && h != 0)
+                set_error(VCN_E_HANDLE, "nieprawidlowy uchwyt wyjscia");
+            return o;
         }
 
         int64_t str_len(const std::string &s)
@@ -306,28 +1101,56 @@ fun volcan_shim_link() -> Int [
         {
         // ---- cykl zycia ----
         int64_t vcn_abi_version(void) { return 1; }
-        int64_t vcn_launcher_start(void) { return (int64_t)LLauncher::startDaemon(); }
+        int64_t vcn_launcher_start(void) { if (!thread_ok()) return 0; return (int64_t)LLauncher::startDaemon(); }
 
         int64_t vcn_init(void)
         {
+            if (!thread_ok()) return 0;
             if (!g_comp)
                 g_comp = new VCompositor();
+            if (!g_comp)
+                g_last_error = "nie udalo sie utworzyc LCompositor";
             return g_comp ? 1 : 0;
         }
 
-        int64_t vcn_start(void) { return (g_comp && g_comp->start()) ? 1 : 0; }
-        int64_t vcn_dispatch(int64_t ms) { return g_comp ? (int64_t)g_comp->dispatch((int)ms) : -1; }
-        int64_t vcn_state(void) { return g_comp ? (int64_t)g_comp->state() : -1; }
-        int64_t vcn_fd(void) { return g_comp ? (int64_t)g_comp->fd() : -1; }
+        int64_t vcn_start(void)
+        {
+            if (!thread_ok()) return 0;
+            if (!g_comp)
+            {
+                g_last_error = "vcn_start przed vcn_init";
+                return 0;
+            }
+            if (!g_comp->start())
+            {
+                g_last_error = "LCompositor::start() nie powiodlo sie (backend, DRM/libseat, gniazdo Wayland)";
+                return 0;
+            }
+            return 1;
+        }
+        static void vcn_pump_hooks(void);
+
+        int64_t vcn_dispatch(int64_t ms)
+        {
+            if (!thread_ok()) return 0;
+            if (!g_comp)
+                return -1;
+            vcn_pump_hooks();
+            return (int64_t)g_comp->dispatch((int)ms);
+        }
+        int64_t vcn_state(void) { if (!thread_ok()) return 0; return g_comp ? (int64_t)g_comp->state() : -1; }
+        int64_t vcn_fd(void) { if (!thread_ok()) return 0; return g_comp ? (int64_t)g_comp->fd() : -1; }
 
         void vcn_finish(void)
         {
+            if (!thread_ok()) return;
             if (g_comp)
                 g_comp->finish();
         }
 
         void vcn_destroy(void)
         {
+            if (!thread_ok()) return;
             delete g_comp;
             g_comp = nullptr;
             g_queue.clear();
@@ -336,6 +1159,7 @@ fun volcan_shim_link() -> Int [
         // ---- bufory napisow ----
         void vcn_buf_clear(int64_t slot)
         {
+            if (!thread_ok()) return;
             if (slot == 0)
                 g_buf0.clear();
             else
@@ -344,6 +1168,7 @@ fun volcan_shim_link() -> Int [
 
         void vcn_buf_push(int64_t slot, int64_t byte)
         {
+            if (!thread_ok()) return;
             char c = (char)(byte & 0xFF);
             if (slot == 0)
                 g_buf0.push_back(c);
@@ -353,11 +1178,13 @@ fun volcan_shim_link() -> Int [
 
         int64_t vcn_setenv(int64_t overwrite)
         {
+            if (!thread_ok()) return 0;
             return setenv(g_buf0.c_str(), g_buf1.c_str(), overwrite ? 1 : 0) == 0 ? 1 : 0;
         }
 
         int64_t vcn_spawn(void)
         {
+            if (!thread_ok()) return 0;
             // podwojny fork: brak zombie, nie ruszamy obslugi sygnalow Louvre
             pid_t child = fork();
             if (child < 0)
@@ -378,11 +1205,12 @@ fun volcan_shim_link() -> Int [
             return 1;
         }
 
-        void vcn_set_manual_policy(int64_t manual) { g_manual = manual != 0; }
+        void vcn_set_manual_policy(int64_t manual) { if (!thread_ok()) return; g_manual = manual != 0; }
 
         // ---- kolejka zdarzen ----
         int64_t vcn_poll(void)
         {
+            if (!thread_ok()) return 0;
             if (g_queue.empty())
                 return 0;
             g_cur = g_queue.front();
@@ -390,17 +1218,19 @@ fun volcan_shim_link() -> Int [
             return 1;
         }
 
-        int64_t vcn_ev_kind(void) { return g_cur.kind; }
-        int64_t vcn_ev_a(void) { return g_cur.a; }
-        int64_t vcn_ev_b(void) { return g_cur.b; }
-        double vcn_ev_x(void) { return g_cur.x; }
-        double vcn_ev_y(void) { return g_cur.y; }
+        int64_t vcn_ev_kind(void) { if (!thread_ok()) return 0; return g_cur.kind; }
+        int64_t vcn_ev_a(void) { if (!thread_ok()) return 0; return g_cur.a; }
+        int64_t vcn_ev_b(void) { if (!thread_ok()) return 0; return g_cur.b; }
+        double vcn_ev_x(void) { if (!thread_ok()) return 0.0; return g_cur.x; }
+        double vcn_ev_y(void) { if (!thread_ok()) return 0.0; return g_cur.y; }
+        int64_t vcn_ev_c(void) { if (!thread_ok()) return 0; return g_cur.c; }
 
         // ---- powierzchnie ----
-        int64_t vcn_surface_count(void) { return g_comp ? (int64_t)g_comp->surfaces().size() : 0; }
+        int64_t vcn_surface_count(void) { if (!thread_ok()) return 0; return g_comp ? (int64_t)g_comp->surfaces().size() : 0; }
 
         int64_t vcn_surface_at(int64_t index)
         {
+            if (!thread_ok()) return 0;
             if (!g_comp || index < 0)
                 return 0;
             int64_t i = 0;
@@ -413,16 +1243,17 @@ fun volcan_shim_link() -> Int [
             return 0;
         }
 
-        int64_t vcn_surface_valid(int64_t h) { return surf(h) ? 1 : 0; }
-        int64_t vcn_surface_role(int64_t h) { LSurface *s = surf(h); return s ? (int64_t)s->roleId() : -1; }
-        int64_t vcn_surface_mapped(int64_t h) { LSurface *s = surf(h); return (s && s->mapped()) ? 1 : 0; }
-        int64_t vcn_surface_x(int64_t h) { LSurface *s = surf(h); return s ? (int64_t)s->pos().x() : 0; }
-        int64_t vcn_surface_y(int64_t h) { LSurface *s = surf(h); return s ? (int64_t)s->pos().y() : 0; }
-        int64_t vcn_surface_width(int64_t h) { LSurface *s = surf(h); return s ? (int64_t)s->size().width() : 0; }
-        int64_t vcn_surface_height(int64_t h) { LSurface *s = surf(h); return s ? (int64_t)s->size().height() : 0; }
+        int64_t vcn_surface_valid(int64_t h) { if (!thread_ok()) return 0; return surf_quiet(h) ? 1 : 0; }
+        int64_t vcn_surface_role(int64_t h) { if (!thread_ok()) return 0; LSurface *s = surf(h); return s ? (int64_t)s->roleId() : -1; }
+        int64_t vcn_surface_mapped(int64_t h) { if (!thread_ok()) return 0; LSurface *s = surf(h); return (s && s->mapped()) ? 1 : 0; }
+        int64_t vcn_surface_x(int64_t h) { if (!thread_ok()) return 0; LSurface *s = surf(h); return s ? (int64_t)s->pos().x() : 0; }
+        int64_t vcn_surface_y(int64_t h) { if (!thread_ok()) return 0; LSurface *s = surf(h); return s ? (int64_t)s->pos().y() : 0; }
+        int64_t vcn_surface_width(int64_t h) { if (!thread_ok()) return 0; LSurface *s = surf(h); return s ? (int64_t)s->size().width() : 0; }
+        int64_t vcn_surface_height(int64_t h) { if (!thread_ok()) return 0; LSurface *s = surf(h); return s ? (int64_t)s->size().height() : 0; }
 
         void vcn_surface_set_pos(int64_t h, int64_t x, int64_t y)
         {
+            if (!thread_ok()) return;
             LSurface *s = surf(h);
             if (s)
                 s->setPos((Int32)x, (Int32)y);
@@ -430,35 +1261,38 @@ fun volcan_shim_link() -> Int [
 
         void vcn_surface_raise(int64_t h)
         {
+            if (!thread_ok()) return;
             LSurface *s = surf(h);
             if (s)
                 s->raise();
         }
 
-        int64_t vcn_surface_parent(int64_t h) { LSurface *s = surf(h); return s ? H(s->parent()) : 0; }
+        int64_t vcn_surface_parent(int64_t h) { if (!thread_ok()) return 0; LSurface *s = surf(h); return s ? H(s->parent()) : 0; }
 
         int64_t vcn_surface_at_point(double x, double y)
         {
+            if (!thread_ok()) return 0;
             if (!g_comp)
                 return 0;
             return H(g_comp->seat()->surfaceAt((Int32)x, (Int32)y));
         }
 
-        int64_t vcn_surface_has_pointer_focus(int64_t h) { LSurface *s = surf(h); return (s && s->hasPointerFocus()) ? 1 : 0; }
-        int64_t vcn_surface_has_keyboard_focus(int64_t h) { LSurface *s = surf(h); return (s && s->hasKeyboardFocus()) ? 1 : 0; }
+        int64_t vcn_surface_has_pointer_focus(int64_t h) { if (!thread_ok()) return 0; LSurface *s = surf(h); return (s && s->hasPointerFocus()) ? 1 : 0; }
+        int64_t vcn_surface_has_keyboard_focus(int64_t h) { if (!thread_ok()) return 0; LSurface *s = surf(h); return (s && s->hasKeyboardFocus()) ? 1 : 0; }
 
         // ---- toplevel ----
-        int64_t vcn_toplevel_title_len(int64_t h) { LToplevelRole *t = top(h); return t ? str_len(t->title()) : 0; }
-        int64_t vcn_toplevel_title_char(int64_t h, int64_t i) { LToplevelRole *t = top(h); return t ? str_at(t->title(), i) : -1; }
-        int64_t vcn_toplevel_app_id_len(int64_t h) { LToplevelRole *t = top(h); return t ? str_len(t->appId()) : 0; }
-        int64_t vcn_toplevel_app_id_char(int64_t h, int64_t i) { LToplevelRole *t = top(h); return t ? str_at(t->appId(), i) : -1; }
-        int64_t vcn_toplevel_activated(int64_t h) { LToplevelRole *t = top(h); return (t && t->isActivated()) ? 1 : 0; }
-        int64_t vcn_toplevel_maximized(int64_t h) { LToplevelRole *t = top(h); return (t && t->isMaximized()) ? 1 : 0; }
-        int64_t vcn_toplevel_fullscreen(int64_t h) { LToplevelRole *t = top(h); return (t && t->isFullscreen()) ? 1 : 0; }
-        int64_t vcn_toplevel_minimized(int64_t h) { LToplevelRole *t = top(h); return (t && t->isMinimized()) ? 1 : 0; }
+        int64_t vcn_toplevel_title_len(int64_t h) { if (!thread_ok()) return 0; LToplevelRole *t = top(h); return t ? str_len(t->title()) : 0; }
+        int64_t vcn_toplevel_title_char(int64_t h, int64_t i) { if (!thread_ok()) return 0; LToplevelRole *t = top(h); return t ? str_at(t->title(), i) : -1; }
+        int64_t vcn_toplevel_app_id_len(int64_t h) { if (!thread_ok()) return 0; LToplevelRole *t = top(h); return t ? str_len(t->appId()) : 0; }
+        int64_t vcn_toplevel_app_id_char(int64_t h, int64_t i) { if (!thread_ok()) return 0; LToplevelRole *t = top(h); return t ? str_at(t->appId(), i) : -1; }
+        int64_t vcn_toplevel_activated(int64_t h) { if (!thread_ok()) return 0; LToplevelRole *t = top(h); return (t && t->isActivated()) ? 1 : 0; }
+        int64_t vcn_toplevel_maximized(int64_t h) { if (!thread_ok()) return 0; LToplevelRole *t = top(h); return (t && t->isMaximized()) ? 1 : 0; }
+        int64_t vcn_toplevel_fullscreen(int64_t h) { if (!thread_ok()) return 0; LToplevelRole *t = top(h); return (t && t->isFullscreen()) ? 1 : 0; }
+        int64_t vcn_toplevel_minimized(int64_t h) { if (!thread_ok()) return 0; LToplevelRole *t = top(h); return (t && t->isMinimized()) ? 1 : 0; }
 
         void vcn_toplevel_set_activated(int64_t h, int64_t flag)
         {
+            if (!thread_ok()) return;
             LToplevelRole *t = top(h);
             if (!t)
                 return;
@@ -472,6 +1306,7 @@ fun volcan_shim_link() -> Int [
 
         void vcn_toplevel_set_maximized(int64_t h, int64_t flag)
         {
+            if (!thread_ok()) return;
             LToplevelRole *t = top(h);
             if (!t)
                 return;
@@ -485,6 +1320,7 @@ fun volcan_shim_link() -> Int [
 
         void vcn_toplevel_set_fullscreen(int64_t h, int64_t flag)
         {
+            if (!thread_ok()) return;
             LToplevelRole *t = top(h);
             if (!t)
                 return;
@@ -498,6 +1334,7 @@ fun volcan_shim_link() -> Int [
 
         void vcn_toplevel_set_minimized(int64_t h, int64_t flag)
         {
+            if (!thread_ok()) return;
             LToplevelRole *t = top(h);
             if (t)
                 t->setMinimized(flag != 0);
@@ -505,6 +1342,7 @@ fun volcan_shim_link() -> Int [
 
         void vcn_toplevel_configure_size(int64_t h, int64_t w, int64_t hh)
         {
+            if (!thread_ok()) return;
             LToplevelRole *t = top(h);
             if (t)
                 t->configureSize((Int32)w, (Int32)hh);
@@ -512,36 +1350,39 @@ fun volcan_shim_link() -> Int [
 
         void vcn_toplevel_close(int64_t h)
         {
+            if (!thread_ok()) return;
             LToplevelRole *t = top(h);
             if (t)
                 t->close();
         }
 
-        int64_t vcn_toplevel_window_x(int64_t h) { LToplevelRole *t = top(h); return t ? (int64_t)t->windowGeometry().x() : 0; }
-        int64_t vcn_toplevel_window_y(int64_t h) { LToplevelRole *t = top(h); return t ? (int64_t)t->windowGeometry().y() : 0; }
-        int64_t vcn_toplevel_window_width(int64_t h) { LToplevelRole *t = top(h); return t ? (int64_t)t->windowGeometry().width() : 0; }
-        int64_t vcn_toplevel_window_height(int64_t h) { LToplevelRole *t = top(h); return t ? (int64_t)t->windowGeometry().height() : 0; }
+        int64_t vcn_toplevel_window_x(int64_t h) { if (!thread_ok()) return 0; LToplevelRole *t = top(h); return t ? (int64_t)t->windowGeometry().x() : 0; }
+        int64_t vcn_toplevel_window_y(int64_t h) { if (!thread_ok()) return 0; LToplevelRole *t = top(h); return t ? (int64_t)t->windowGeometry().y() : 0; }
+        int64_t vcn_toplevel_window_width(int64_t h) { if (!thread_ok()) return 0; LToplevelRole *t = top(h); return t ? (int64_t)t->windowGeometry().width() : 0; }
+        int64_t vcn_toplevel_window_height(int64_t h) { if (!thread_ok()) return 0; LToplevelRole *t = top(h); return t ? (int64_t)t->windowGeometry().height() : 0; }
 
         // ---- wyjscia ----
-        int64_t vcn_output_count(void) { return g_comp ? (int64_t)g_comp->outputs().size() : 0; }
+        int64_t vcn_output_count(void) { if (!thread_ok()) return 0; return g_comp ? (int64_t)g_comp->outputs().size() : 0; }
 
         int64_t vcn_output_at(int64_t index)
         {
+            if (!thread_ok()) return 0;
             if (!g_comp || index < 0 || index >= (int64_t)g_comp->outputs().size())
                 return 0;
             return H(g_comp->outputs().at((size_t)index));
         }
 
-        int64_t vcn_output_name_len(int64_t h) { LOutput *o = outp(h); return o ? str_len(o->name()) : 0; }
-        int64_t vcn_output_name_char(int64_t h, int64_t i) { LOutput *o = outp(h); return o ? str_at(o->name(), i) : -1; }
-        int64_t vcn_output_x(int64_t h) { LOutput *o = outp(h); return o ? (int64_t)o->pos().x() : 0; }
-        int64_t vcn_output_y(int64_t h) { LOutput *o = outp(h); return o ? (int64_t)o->pos().y() : 0; }
-        int64_t vcn_output_width(int64_t h) { LOutput *o = outp(h); return o ? (int64_t)o->size().width() : 0; }
-        int64_t vcn_output_height(int64_t h) { LOutput *o = outp(h); return o ? (int64_t)o->size().height() : 0; }
-        double vcn_output_scale(int64_t h) { LOutput *o = outp(h); return o ? (double)o->scale() : 1.0; }
+        int64_t vcn_output_name_len(int64_t h) { if (!thread_ok()) return 0; LOutput *o = outp(h); return o ? str_len(o->name()) : 0; }
+        int64_t vcn_output_name_char(int64_t h, int64_t i) { if (!thread_ok()) return 0; LOutput *o = outp(h); return o ? str_at(o->name(), i) : -1; }
+        int64_t vcn_output_x(int64_t h) { if (!thread_ok()) return 0; LOutput *o = outp(h); return o ? (int64_t)o->pos().x() : 0; }
+        int64_t vcn_output_y(int64_t h) { if (!thread_ok()) return 0; LOutput *o = outp(h); return o ? (int64_t)o->pos().y() : 0; }
+        int64_t vcn_output_width(int64_t h) { if (!thread_ok()) return 0; LOutput *o = outp(h); return o ? (int64_t)o->size().width() : 0; }
+        int64_t vcn_output_height(int64_t h) { if (!thread_ok()) return 0; LOutput *o = outp(h); return o ? (int64_t)o->size().height() : 0; }
+        double vcn_output_scale(int64_t h) { if (!thread_ok()) return 0.0; LOutput *o = outp(h); return o ? (double)o->scale() : 1.0; }
 
         void vcn_output_set_scale(int64_t h, double scale)
         {
+            if (!thread_ok()) return;
             LOutput *o = outp(h);
             if (o)
                 o->setScale((Float32)scale);
@@ -549,6 +1390,7 @@ fun volcan_shim_link() -> Int [
 
         void vcn_output_set_pos(int64_t h, int64_t x, int64_t y)
         {
+            if (!thread_ok()) return;
             LOutput *o = outp(h);
             if (o)
                 o->setPos(SkIPoint::Make((int32_t)x, (int32_t)y));
@@ -556,15 +1398,17 @@ fun volcan_shim_link() -> Int [
 
         void vcn_output_repaint(int64_t h)
         {
+            if (!thread_ok()) return;
             LOutput *o = outp(h);
             if (o)
                 o->repaint();
         }
 
-        int64_t vcn_output_vsync(int64_t h) { LOutput *o = outp(h); return (o && o->isVSyncEnabled()) ? 1 : 0; }
+        int64_t vcn_output_vsync(int64_t h) { if (!thread_ok()) return 0; LOutput *o = outp(h); return (o && o->isVSyncEnabled()) ? 1 : 0; }
 
         void vcn_output_set_vsync(int64_t h, int64_t flag)
         {
+            if (!thread_ok()) return;
             LOutput *o = outp(h);
             if (o)
                 o->enableVSync(flag != 0);
@@ -572,49 +1416,56 @@ fun volcan_shim_link() -> Int [
 
         void vcn_repaint_all(void)
         {
+            if (!thread_ok()) return;
             if (g_comp)
                 g_comp->repaintAllOutputs();
         }
 
         // ---- wskaznik, klawiatura, seat ----
-        double vcn_cursor_x(void) { return g_comp ? (double)g_comp->cursor()->pos().x() : 0.0; }
-        double vcn_cursor_y(void) { return g_comp ? (double)g_comp->cursor()->pos().y() : 0.0; }
+        double vcn_cursor_x(void) { if (!thread_ok()) return 0.0; return g_comp ? (double)g_comp->cursor()->pos().x() : 0.0; }
+        double vcn_cursor_y(void) { if (!thread_ok()) return 0.0; return g_comp ? (double)g_comp->cursor()->pos().y() : 0.0; }
 
         void vcn_cursor_set_pos(double x, double y)
         {
+            if (!thread_ok()) return;
             if (g_comp)
                 g_comp->cursor()->setPos((Float32)x, (Float32)y);
         }
 
         void vcn_cursor_set_visible(int64_t flag)
         {
+            if (!thread_ok()) return;
             if (g_comp)
                 g_comp->cursor()->setVisible(flag != 0);
         }
 
-        int64_t vcn_pointer_focus(void) { return g_comp ? H(g_comp->seat()->pointer()->focus()) : 0; }
+        int64_t vcn_pointer_focus(void) { if (!thread_ok()) return 0; return g_comp ? H(g_comp->seat()->pointer()->focus()) : 0; }
 
         void vcn_pointer_set_focus(int64_t h)
         {
+            if (!thread_ok()) return;
             if (g_comp)
                 g_comp->seat()->pointer()->setFocus(h == 0 ? nullptr : surf(h));
         }
 
-        int64_t vcn_keyboard_focus(void) { return g_comp ? H(g_comp->seat()->keyboard()->focus()) : 0; }
+        int64_t vcn_keyboard_focus(void) { if (!thread_ok()) return 0; return g_comp ? H(g_comp->seat()->keyboard()->focus()) : 0; }
 
         void vcn_keyboard_set_focus(int64_t h)
         {
+            if (!thread_ok()) return;
             if (g_comp)
                 g_comp->seat()->keyboard()->setFocus(h == 0 ? nullptr : surf(h));
         }
 
         int64_t vcn_key_pressed(int64_t code)
         {
+            if (!thread_ok()) return 0;
             return (g_comp && g_comp->seat()->keyboard()->isKeyCodePressed((UInt32)code)) ? 1 : 0;
         }
 
         int64_t vcn_active_toplevel(void)
         {
+            if (!thread_ok()) return 0;
             if (!g_comp)
                 return 0;
             LToplevelRole *t = g_comp->seat()->activeToplevel();
@@ -623,12 +1474,1425 @@ fun volcan_shim_link() -> Int [
 
         int64_t vcn_seat_name_len(void)
         {
+            if (!thread_ok()) return 0;
             return g_comp ? (int64_t)std::string(g_comp->seat()->name()).size() : 0;
         }
 
         int64_t vcn_seat_name_char(int64_t i)
         {
+            if (!thread_ok()) return 0;
             return g_comp ? str_at(std::string(g_comp->seat()->name()), i) : -1;
+        }
+
+        // ---- v2: lancuchy C (dla H#, C, Rust itd.) ----
+        // Zwracany wskaznik zyje do okolo 64 kolejnych wywolan funkcji *_c.
+        static const char *vcn_ring(const std::string &s)
+        {
+            static std::string pool[64];
+            static unsigned idx = 0;
+            std::string &slot = pool[idx++ % 64u];
+            slot = s;
+            return slot.c_str();
+        }
+
+        int64_t vcn_setenv_c(const char *name, const char *value, int64_t overwrite)
+        {
+            if (!thread_ok()) return 0;
+            if (!name || !value)
+                return 0;
+            return setenv(name, value, overwrite ? 1 : 0) == 0 ? 1 : 0;
+        }
+
+        int64_t vcn_spawn_c(const char *command)
+        {
+            if (!thread_ok()) return 0;
+            if (!command)
+                return 0;
+            g_buf0 = command;
+            return vcn_spawn();
+        }
+
+        const char *vcn_toplevel_title_c(int64_t h) { if (!thread_ok()) return ""; LToplevelRole *t = top(h); return vcn_ring(t ? std::string(t->title()) : std::string()); }
+        const char *vcn_toplevel_app_id_c(int64_t h) { if (!thread_ok()) return ""; LToplevelRole *t = top(h); return vcn_ring(t ? std::string(t->appId()) : std::string()); }
+        const char *vcn_output_name_c(int64_t h) { if (!thread_ok()) return ""; LOutput *o = outp(h); return vcn_ring(o ? std::string(o->name()) : std::string()); }
+        const char *vcn_seat_name_c(void) { if (!thread_ok()) return ""; return vcn_ring(g_comp ? std::string(g_comp->seat()->name()) : std::string()); }
+
+        // ---- v2: toplevel ----
+        void vcn_toplevel_configure_bounds(int64_t h, int64_t w, int64_t hh)
+        {
+            if (!thread_ok()) return;
+            LToplevelRole *t = top(h);
+            if (t)
+                t->configureBounds((Int32)w, (Int32)hh);
+        }
+
+        int64_t vcn_toplevel_min_width(int64_t h) { if (!thread_ok()) return 0; LToplevelRole *t = top(h); return t ? (int64_t)t->minSize().width() : 0; }
+        int64_t vcn_toplevel_min_height(int64_t h) { if (!thread_ok()) return 0; LToplevelRole *t = top(h); return t ? (int64_t)t->minSize().height() : 0; }
+        int64_t vcn_toplevel_max_width(int64_t h) { if (!thread_ok()) return 0; LToplevelRole *t = top(h); return t ? (int64_t)t->maxSize().width() : 0; }
+        int64_t vcn_toplevel_max_height(int64_t h) { if (!thread_ok()) return 0; LToplevelRole *t = top(h); return t ? (int64_t)t->maxSize().height() : 0; }
+        int64_t vcn_toplevel_supports_ssd(int64_t h) { if (!thread_ok()) return 0; LToplevelRole *t = top(h); return (t && t->supportsSSD()) ? 1 : 0; }
+        int64_t vcn_toplevel_decoration(int64_t h) { if (!thread_ok()) return 0; LToplevelRole *t = top(h); return t ? (int64_t)t->decorationMode() : -1; }
+
+        void vcn_toplevel_set_decoration(int64_t h, int64_t server_side)
+        {
+            if (!thread_ok()) return;
+            LToplevelRole *t = top(h);
+            if (t)
+                t->configureDecorationMode(server_side ? LToplevelRole::ServerSide : LToplevelRole::ClientSide);
+        }
+
+        // ---- v2: wyjscia ----
+        int64_t vcn_output_available_x(int64_t h) { if (!thread_ok()) return 0; LOutput *o = outp(h); return o ? (int64_t)o->availableGeometry().x() : 0; }
+        int64_t vcn_output_available_y(int64_t h) { if (!thread_ok()) return 0; LOutput *o = outp(h); return o ? (int64_t)o->availableGeometry().y() : 0; }
+        int64_t vcn_output_available_width(int64_t h) { if (!thread_ok()) return 0; LOutput *o = outp(h); return o ? (int64_t)o->availableGeometry().width() : 0; }
+        int64_t vcn_output_available_height(int64_t h) { if (!thread_ok()) return 0; LOutput *o = outp(h); return o ? (int64_t)o->availableGeometry().height() : 0; }
+        int64_t vcn_output_transform(int64_t h) { if (!thread_ok()) return 0; LOutput *o = outp(h); return o ? (int64_t)o->transform() : 0; }
+
+        void vcn_output_set_transform(int64_t h, int64_t t)
+        {
+            if (!thread_ok()) return;
+            LOutput *o = outp(h);
+            if (o && t >= 0 && t <= 3)
+                o->setTransform((CZTransform)t);
+        }
+
+        int64_t vcn_output_mode_count(int64_t h) { if (!thread_ok()) return 0; LOutput *o = outp(h); return o ? (int64_t)o->modes().size() : 0; }
+
+        static std::shared_ptr<LOutputMode> vcn_mode(int64_t h, int64_t i)
+        {
+            LOutput *o = outp(h);
+            if (!o || i < 0 || i >= (int64_t)o->modes().size())
+                return nullptr;
+            return o->modes().at((size_t)i);
+        }
+
+        int64_t vcn_output_mode_width(int64_t h, int64_t i) { if (!thread_ok()) return 0; auto m = vcn_mode(h, i); return m ? (int64_t)m->size().width() : 0; }
+        int64_t vcn_output_mode_height(int64_t h, int64_t i) { if (!thread_ok()) return 0; auto m = vcn_mode(h, i); return m ? (int64_t)m->size().height() : 0; }
+        int64_t vcn_output_mode_refresh(int64_t h, int64_t i) { if (!thread_ok()) return 0; auto m = vcn_mode(h, i); return m ? (int64_t)m->refreshRate() : 0; }
+        int64_t vcn_output_mode_preferred(int64_t h, int64_t i) { if (!thread_ok()) return 0; auto m = vcn_mode(h, i); return (m && m->isPreferred()) ? 1 : 0; }
+
+        int64_t vcn_output_current_mode(int64_t h)
+        {
+            if (!thread_ok()) return 0;
+            LOutput *o = outp(h);
+            if (!o)
+                return -1;
+            auto cur = o->currentMode();
+            for (size_t i = 0; i < o->modes().size(); i++)
+                if (o->modes().at(i) == cur)
+                    return (int64_t)i;
+            return -1;
+        }
+
+        int64_t vcn_output_set_mode(int64_t h, int64_t i)
+        {
+            if (!thread_ok()) return 0;
+            LOutput *o = outp(h);
+            auto m = vcn_mode(h, i);
+            if (!o || !m)
+                return 0;
+            return o->setMode(m) ? 1 : 0;
+        }
+
+        // ---- v2: kursor jako liczby calkowite (bez rzutowan Float -> Int) ----
+        int64_t vcn_cursor_ix(void) { if (!thread_ok()) return 0; return g_comp ? (int64_t)g_comp->cursor()->pos().x() : 0; }
+        int64_t vcn_cursor_iy(void) { if (!thread_ok()) return 0; return g_comp ? (int64_t)g_comp->cursor()->pos().y() : 0; }
+
+        // ================= rozszerzenia =================
+
+        // ---- zgodnosc, funkcje, bledy ----
+        int64_t vcn_abi_min(void) { return 1; }
+        int64_t vcn_abi_compatible(int64_t required) { return (required >= 1 && required <= vcn_abi_version()) ? 1 : 0; }
+
+        // Bity: 1 popupy, 2 layer-shell, 4 dotyk, 8 gesty, 16 schowek, 32 DND, 64 blokada sesji,
+        // 128 wlasne rysowanie, 256 gamma, 512 IPC, 1024 konfiguracja, 2048 klawiatura xkb.
+        int64_t vcn_features(void) { return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024 | 2048; }
+
+        int64_t vcn_dropped_events(void) { return g_dropped; }
+        int64_t vcn_last_code(void) { return g_code; }
+        void vcn_clear_error(void) { g_code = 0; g_last_error.clear(); }
+        int64_t vcn_thread_violations(void) { return g_thread_violations; }
+
+        // Przekazuje wlasnosc kontraktu jednowatkowego biezacemu watkowi (np. po przeniesieniu petli).
+        void vcn_thread_adopt(void)
+        {
+            g_owner = std::this_thread::get_id();
+            g_owner_set = true;
+        }
+        const char *vcn_last_error_c(void) { return vcn_ring(g_last_error); }
+
+        int64_t vcn_last_error(void)
+        {
+            if (!thread_ok()) return 0;
+            g_buf1 = g_last_error;
+            return (int64_t)g_buf1.size();
+        }
+
+        int64_t vcn_ev_utf8(void)
+        {
+            if (!thread_ok()) return 0;
+            g_buf1 = g_cur.s;
+            return (int64_t)g_buf1.size();
+        }
+
+        const char *vcn_ev_utf8_c(void) { if (!thread_ok()) return ""; return vcn_ring(g_cur.s); }
+
+        // ---- bufory po stronie wywolujacego: zwraca pelna dlugosc, zapisuje maks. cap-1 bajtow + NUL ----
+        static int64_t vcn_copy_out(const std::string &s, char *buf, int64_t cap)
+        {
+            if (buf && cap > 0)
+            {
+                size_t n = std::min((size_t)(cap - 1), s.size());
+                std::memcpy(buf, s.data(), n);
+                buf[n] = 0;
+            }
+            return (int64_t)s.size();
+        }
+
+        int64_t vcn_toplevel_title_buf(int64_t h, char *buf, int64_t cap) { if (!thread_ok()) return 0; LToplevelRole *t = top(h); return vcn_copy_out(t ? std::string(t->title()) : std::string(), buf, cap); }
+        int64_t vcn_toplevel_app_id_buf(int64_t h, char *buf, int64_t cap) { if (!thread_ok()) return 0; LToplevelRole *t = top(h); return vcn_copy_out(t ? std::string(t->appId()) : std::string(), buf, cap); }
+        int64_t vcn_output_name_buf(int64_t h, char *buf, int64_t cap) { if (!thread_ok()) return 0; LOutput *o = outp(h); return vcn_copy_out(o ? std::string(o->name()) : std::string(), buf, cap); }
+        int64_t vcn_last_error_buf(char *buf, int64_t cap) { return vcn_copy_out(g_last_error, buf, cap); }
+
+        // ---- popupy ----
+        static LPopupRole *pop(int64_t h) { LSurface *s = surf(h); return s ? s->popup() : nullptr; }
+
+        void vcn_popup_dismiss(int64_t h) { if (!thread_ok()) return; LPopupRole *p = pop(h); if (p) p->dismiss(); }
+        int64_t vcn_popup_is_topmost(int64_t h) { if (!thread_ok()) return 0; LPopupRole *p = pop(h); return (p && p->isTopmostPopup()) ? 1 : 0; }
+        int64_t vcn_popup_x(int64_t h) { if (!thread_ok()) return 0; LPopupRole *p = pop(h); return p ? (int64_t)p->rolePos().x() : 0; }
+        int64_t vcn_popup_y(int64_t h) { if (!thread_ok()) return 0; LPopupRole *p = pop(h); return p ? (int64_t)p->rolePos().y() : 0; }
+        int64_t vcn_popup_width(int64_t h) { if (!thread_ok()) return 0; LPopupRole *p = pop(h); return p ? (int64_t)p->windowGeometry().width() : 0; }
+        int64_t vcn_popup_height(int64_t h) { if (!thread_ok()) return 0; LPopupRole *p = pop(h); return p ? (int64_t)p->windowGeometry().height() : 0; }
+
+        void vcn_popup_configure_rect(int64_t h, int64_t x, int64_t y, int64_t w, int64_t hh)
+        {
+            if (!thread_ok()) return;
+            LPopupRole *p = pop(h);
+            if (p)
+                p->configureRect(SkIRect::MakeXYWH((int32_t)x, (int32_t)y, (int32_t)w, (int32_t)hh));
+        }
+
+        // ---- layer-shell: warstwa 0 tlo, 1 dol, 3 gora, 4 nakladka; kotwice jak EDGE_* (1 gora, 2 dol, 4 lewa, 8 prawa) ----
+        static LLayerRole *lay(int64_t h) { LSurface *s = surf(h); return s ? s->layerRole() : nullptr; }
+
+        int64_t vcn_layer_layer(int64_t h) { if (!thread_ok()) return 0; LLayerRole *l = lay(h); return l ? (int64_t)l->layer() : -1; }
+
+        int64_t vcn_layer_anchor(int64_t h)
+        {
+            if (!thread_ok()) return 0;
+            LLayerRole *l = lay(h);
+            if (!l)
+                return 0;
+            int64_t m = 0;
+            if (l->anchor().has(CZEdgeTop))
+                m |= 1;
+            if (l->anchor().has(CZEdgeBottom))
+                m |= 2;
+            if (l->anchor().has(CZEdgeLeft))
+                m |= 4;
+            if (l->anchor().has(CZEdgeRight))
+                m |= 8;
+            return m;
+        }
+
+        int64_t vcn_layer_exclusive_zone(int64_t h) { if (!thread_ok()) return 0; LLayerRole *l = lay(h); return l ? (int64_t)l->exclusiveZoneSize() : 0; }
+        int64_t vcn_layer_margin_top(int64_t h) { if (!thread_ok()) return 0; LLayerRole *l = lay(h); return l ? (int64_t)l->margins().top : 0; }
+        int64_t vcn_layer_margin_right(int64_t h) { if (!thread_ok()) return 0; LLayerRole *l = lay(h); return l ? (int64_t)l->margins().right : 0; }
+        int64_t vcn_layer_margin_bottom(int64_t h) { if (!thread_ok()) return 0; LLayerRole *l = lay(h); return l ? (int64_t)l->margins().bottom : 0; }
+        int64_t vcn_layer_margin_left(int64_t h) { if (!thread_ok()) return 0; LLayerRole *l = lay(h); return l ? (int64_t)l->margins().left : 0; }
+        int64_t vcn_layer_interactivity(int64_t h) { if (!thread_ok()) return 0; LLayerRole *l = lay(h); return l ? (int64_t)l->keyboardInteractivity() : 0; }
+        int64_t vcn_layer_width(int64_t h) { if (!thread_ok()) return 0; LLayerRole *l = lay(h); return l ? (int64_t)l->size().width() : 0; }
+        int64_t vcn_layer_height(int64_t h) { if (!thread_ok()) return 0; LLayerRole *l = lay(h); return l ? (int64_t)l->size().height() : 0; }
+        void vcn_layer_close(int64_t h) { if (!thread_ok()) return; LLayerRole *l = lay(h); if (l) l->close(); }
+
+        void vcn_layer_configure_size(int64_t h, int64_t w, int64_t hh)
+        {
+            if (!thread_ok()) return;
+            LLayerRole *l = lay(h);
+            if (l)
+                l->configureSize(SkISize::Make((int32_t)w, (int32_t)hh));
+        }
+
+        const char *vcn_layer_scope_c(int64_t h) { if (!thread_ok()) return ""; LLayerRole *l = lay(h); return vcn_ring(l ? std::string(l->scope()) : std::string()); }
+        int64_t vcn_layer_scope_buf(int64_t h, char *buf, int64_t cap) { if (!thread_ok()) return 0; LLayerRole *l = lay(h); return vcn_copy_out(l ? std::string(l->scope()) : std::string(), buf, cap); }
+
+        // ---- klawiatura ----
+        int64_t vcn_keyboard_set_keymap_c(const char *layout, const char *variant, const char *options)
+        {
+            if (!thread_ok()) return 0;
+            if (!g_comp)
+                return 0;
+            return g_comp->seat()->keyboard()->setKeymap(nullptr, nullptr, layout && *layout ? layout : nullptr, variant && *variant ? variant : nullptr, options && *options ? options : nullptr) ? 1 : 0;
+        }
+
+        int64_t vcn_keyboard_repeat_rate(void) { if (!thread_ok()) return 0; return g_comp ? (int64_t)g_comp->seat()->keyboard()->repeatRate() : 0; }
+        int64_t vcn_keyboard_repeat_delay(void) { if (!thread_ok()) return 0; return g_comp ? (int64_t)g_comp->seat()->keyboard()->repeatDelay() : 0; }
+
+        void vcn_keyboard_set_repeat(int64_t rate, int64_t delay_ms)
+        {
+            if (!thread_ok()) return;
+            if (g_comp)
+                g_comp->seat()->keyboard()->setRepeatInfo((Int32)rate, (Int32)delay_ms);
+        }
+
+        // Modyfikatory z stanu xkb: 1 shift, 2 ctrl, 4 alt, 8 super.
+        int64_t vcn_keyboard_mods(void)
+        {
+            if (!thread_ok()) return 0;
+            if (!g_comp)
+                return 0;
+            LKeyboard *k = g_comp->seat()->keyboard();
+            int64_t m = 0;
+            if (k->isModActive(XKB_MOD_NAME_SHIFT, XKB_STATE_MODS_EFFECTIVE))
+                m |= 1;
+            if (k->isModActive(XKB_MOD_NAME_CTRL, XKB_STATE_MODS_EFFECTIVE))
+                m |= 2;
+            if (k->isModActive(XKB_MOD_NAME_ALT, XKB_STATE_MODS_EFFECTIVE))
+                m |= 4;
+            if (k->isModActive(XKB_MOD_NAME_LOGO, XKB_STATE_MODS_EFFECTIVE))
+                m |= 8;
+            return m;
+        }
+
+        // ---- schowek, DND, bezczynnosc, blokada sesji ----
+        void vcn_clipboard_set_allow(int64_t allow) { if (!thread_ok()) return; g_clip_allow = allow != 0; }
+        void vcn_dnd_cancel(void) { if (!thread_ok()) return; if (g_comp) g_comp->seat()->dnd()->cancel(); }
+        void vcn_seat_set_idle_hint(int64_t idle) { if (!thread_ok()) return; if (g_comp) g_comp->seat()->setIsUserIdleHint(idle != 0); }
+        int64_t vcn_seat_idle_hint(void) { if (!thread_ok()) return 0; return (g_comp && g_comp->seat()->isUserIdleHint()) ? 1 : 0; }
+        int64_t vcn_idle_inhibitor_count(void) { if (!thread_ok()) return 0; return g_comp ? (int64_t)g_comp->seat()->idleInhibitorSurfaces().size() : 0; }
+
+        void vcn_session_lock_set_allow(int64_t allow) { if (!thread_ok()) return; g_lock_allow = allow != 0; }
+        int64_t vcn_session_lock_state(void) { if (!thread_ok()) return 0; return g_comp ? (int64_t)g_comp->sessionLockManager()->state() : 0; }
+        void vcn_session_force_unlock(void) { if (!thread_ok()) return; if (g_comp) g_comp->sessionLockManager()->forceUnlock(); }
+
+        // ---- gamma (np. filtr swiatla nocnego): skala kanalow w promilach, 1000 = bez zmian ----
+        int64_t vcn_output_gamma_size(int64_t h) { if (!thread_ok()) return 0; LOutput *o = outp(h); return o ? (int64_t)o->gammaSize() : 0; }
+
+        int64_t vcn_output_set_gamma_scale(int64_t h, int64_t r_permille, int64_t g_permille, int64_t b_permille)
+        {
+            if (!thread_ok()) return 0;
+            LOutput *o = outp(h);
+            if (!o || o->gammaSize() < 2)
+                return 0;
+            const size_t n = o->gammaSize();
+            auto lut = RGammaLUT::Make(n);
+            if (!lut)
+                return 0;
+            auto clampv = [](int64_t v) { return (UInt16)std::max<int64_t>(0, std::min<int64_t>(65535, v)); };
+            for (size_t i = 0; i < n; i++)
+            {
+                int64_t base = (int64_t)i * 65535 / (int64_t)(n - 1);
+                lut->red()[i] = clampv(base * r_permille / 1000);
+                lut->green()[i] = clampv(base * g_permille / 1000);
+                lut->blue()[i] = clampv(base * b_permille / 1000);
+            }
+            return o->setGammaLUT(lut) ? 1 : 0;
+        }
+
+        // ---- wlasne rysowanie: tlo, ramki okien, prostokaty nakladek (kolory ARGB 0xAARRGGBB) ----
+        int64_t vcn_png_write_rgba_c(const char *path, int64_t w, int64_t h, const uint8_t *rgba);
+
+        // ---- styl: tlo, ramki, zaokraglenia, cienie ----
+        void vcn_style_enable(int64_t on) { if (!thread_ok()) return; g_style.enabled = on != 0; vcn_repaint_all(); }
+        void vcn_style_background(int64_t argb) { if (!thread_ok()) return; g_style.background = (uint32_t)argb; vcn_repaint_all(); }
+
+        void vcn_style_border(int64_t width, int64_t active_argb, int64_t inactive_argb)
+        {
+            if (!thread_ok()) return;
+            g_style.border = width < 0 ? 0 : width;
+            g_style.border_active = (uint32_t)active_argb;
+            g_style.border_inactive = (uint32_t)inactive_argb;
+            vcn_repaint_all();
+        }
+
+        // Promien zaokraglenia rogow okien toplevel (0 = bez zaokraglen).
+        void vcn_style_radius(int64_t radius)
+        {
+            if (!thread_ok()) return;
+            g_style.radius = std::max<int64_t>(0, std::min<int64_t>(radius, 64));
+            vcn_repaint_all();
+        }
+
+        // Cien pod oknami: promien rozmycia (0 = brak), przesuniecie, kolor ARGB.
+        void vcn_style_shadow(int64_t radius, int64_t dx, int64_t dy, int64_t argb)
+        {
+            if (!thread_ok()) return;
+            g_style.shadow_radius = std::max<int64_t>(0, std::min<int64_t>(radius, 128));
+            g_style.shadow_dx = dx;
+            g_style.shadow_dy = dy;
+            g_style.shadow_color = (uint32_t)argb;
+            vcn_repaint_all();
+        }
+
+        // ---- nakladki (z grupami: grupa 0 to nakladki uzytkownika, wm uzywa grupy 1) ----
+        void vcn_overlay_clear(void) { if (!thread_ok()) return; g_style.overlays.clear(); g_style.texts.clear(); vcn_repaint_all(); }
+
+        void vcn_overlay_clear_group(int64_t group)
+        {
+            if (!thread_ok()) return;
+            g_style.overlays.erase(std::remove_if(g_style.overlays.begin(), g_style.overlays.end(), [&](const OverlayRect &o) { return o.group == group; }), g_style.overlays.end());
+            g_style.texts.erase(std::remove_if(g_style.texts.begin(), g_style.texts.end(), [&](const OverlayText &o) { return o.group == group; }), g_style.texts.end());
+            vcn_repaint_all();
+        }
+
+        int64_t vcn_overlay_count(void) { if (!thread_ok()) return 0; return (int64_t)(g_style.overlays.size() + g_style.texts.size()); }
+
+        int64_t vcn_overlay_rect_g(int64_t group, int64_t x, int64_t y, int64_t w, int64_t h, int64_t argb)
+        {
+            if (!thread_ok()) return 0;
+            if (g_style.overlays.size() >= 4096)
+            {
+                set_error(VCN_E_STATE, "za duzo nakladek");
+                return -1;
+            }
+            g_style.overlays.push_back(OverlayRect { x, y, w, h, (uint32_t)argb, group });
+            vcn_repaint_all();
+            return (int64_t)g_style.overlays.size() - 1;
+        }
+
+        int64_t vcn_overlay_rect(int64_t x, int64_t y, int64_t w, int64_t h, int64_t argb) { if (!thread_ok()) return 0; return vcn_overlay_rect_g(0, x, y, w, h, argb); }
+
+        // Tekst nakladki: (x, y) to linia bazowa, size w pikselach.
+        int64_t vcn_overlay_text_c(int64_t group, int64_t x, int64_t y, int64_t size, int64_t argb, const char *text)
+        {
+            if (!thread_ok()) return 0;
+            if (!text || g_style.texts.size() >= 4096)
+            {
+                set_error(VCN_E_ARG, "zly tekst nakladki");
+                return -1;
+            }
+            g_style.texts.push_back(OverlayText { x, y, std::max<int64_t>(4, std::min<int64_t>(size, 200)), (uint32_t)argb, text, group });
+            vcn_repaint_all();
+            return (int64_t)g_style.texts.size() - 1;
+        }
+
+        // Wersja dla HackerScript: tekst w buforze 0.
+        int64_t vcn_overlay_text(int64_t group, int64_t x, int64_t y, int64_t size, int64_t argb)
+        {
+            if (!thread_ok()) return 0;
+            return vcn_overlay_text_c(group, x, y, size, argb, g_buf0.c_str());
+        }
+
+        // ---- dekoracje po stronie serwera ----
+        // tryb: 0 wylaczone, 1 wszystkie toplevele, 2 tylko te, ktore zgodzily sie na SSD
+        void vcn_deco_enable(int64_t mode)
+        {
+            if (!thread_ok()) return;
+            g_style.deco.mode = std::max<int64_t>(0, std::min<int64_t>(mode, 2));
+            vcn_repaint_all();
+        }
+
+        void vcn_deco_style(int64_t bar_h, int64_t font_px, int64_t bg_active, int64_t bg_inactive, int64_t fg_active, int64_t fg_inactive)
+        {
+            if (!thread_ok()) return;
+            g_style.deco.bar_h = std::max<int64_t>(12, std::min<int64_t>(bar_h, 80));
+            g_style.deco.font_px = std::max<int64_t>(6, std::min<int64_t>(font_px, 48));
+            g_style.deco.bg_active = (uint32_t)bg_active;
+            g_style.deco.bg_inactive = (uint32_t)bg_inactive;
+            g_style.deco.fg_active = (uint32_t)fg_active;
+            g_style.deco.fg_inactive = (uint32_t)fg_inactive;
+            vcn_repaint_all();
+        }
+
+        void vcn_deco_buttons(int64_t size, int64_t gap, int64_t close_argb, int64_t max_argb, int64_t min_argb)
+        {
+            if (!thread_ok()) return;
+            g_style.deco.btn_size = std::max<int64_t>(6, std::min<int64_t>(size, 40));
+            g_style.deco.btn_gap = std::max<int64_t>(0, std::min<int64_t>(gap, 40));
+            g_style.deco.btn_close = (uint32_t)close_argb;
+            g_style.deco.btn_max = (uint32_t)max_argb;
+            g_style.deco.btn_min = (uint32_t)min_argb;
+            vcn_repaint_all();
+        }
+
+        void vcn_deco_font_c(const char *family)
+        {
+            if (!thread_ok()) return;
+            if (family && *family)
+                g_style.deco.font_family = family;
+            vcn_repaint_all();
+        }
+
+        void vcn_deco_font(void) { if (!thread_ok()) return; vcn_deco_font_c(g_buf0.c_str()); }
+        int64_t vcn_deco_bar_height(void) { if (!thread_ok()) return 0; return g_style.deco.mode ? g_style.deco.bar_h : 0; }
+
+        // Trafienie w dekoracje w punkcie globalnym: uchwyt okna (0 gdy brak) i czesc:
+        // 1 pasek tytulowy, 2 zamknij, 3 maksymalizuj, 4 minimalizuj.
+        static int64_t deco_hit(double fx, double fy, int64_t *part)
+        {
+            *part = 0;
+            if (!g_comp || g_style.deco.mode == 0)
+                return 0;
+            const int32_t x = (int32_t)std::floor(fx), y = (int32_t)std::floor(fy);
+            const auto &all = g_comp->surfaces();
+            for (auto it = all.rbegin(); it != all.rend(); ++it)
+            {
+                DecoGeom g {};
+                if (!(*it)->toplevel() || !deco_geom(*it, g))
+                    continue;
+                if (g.body.contains(x, y))
+                    return 0;       // wyzej lezace okno przykrywa dekoracje nizszych
+                if (!g.bar.contains(x, y))
+                    continue;
+                *part = g.close.contains(x, y) ? 2 : g.maxi.contains(x, y) ? 3 : g.mini.contains(x, y) ? 4 : 1;
+                return H(*it);
+            }
+            return 0;
+        }
+
+        int64_t vcn_deco_hit_handle(double x, double y) { if (!thread_ok()) return 0; int64_t p; return deco_hit(x, y, &p); }
+        int64_t vcn_deco_hit_part(double x, double y) { if (!thread_ok()) return 0; int64_t p; deco_hit(x, y, &p); return p; }
+
+        // ---- tapeta z pliku (png/jpg wg obslugi Ream); tryb: 0 rozciagnij, 1 wypelnij, 2 dopasuj, 3 srodek ----
+        int64_t vcn_wallpaper_set_c(const char *path, int64_t mode)
+        {
+            if (!thread_ok()) return 0;
+            if (!path || !*path)
+            {
+                set_error(VCN_E_ARG, "pusta sciezka tapety");
+                return 0;
+            }
+            auto ream = RCore::Get();
+            if (!ream || !ream->mainDevice())
+            {
+                set_error(VCN_E_STATE, "Ream nie jest zainicjowany (najpierw vcn_start)");
+                return 0;
+            }
+            auto format = ream->mainDevice()->textureFormats().formats().find(DRM_FORMAT_ARGB8888);
+            if (format == ream->mainDevice()->textureFormats().formats().end())
+            {
+                set_error(VCN_E_UNSUPPORTED, "brak formatu ARGB8888 dla tekstur");
+                return 0;
+            }
+            auto image = RImage::LoadFile(path, *format);
+            if (!image)
+            {
+                set_error(VCN_E_IO, "nie mozna wczytac obrazu tapety");
+                return 0;
+            }
+            g_style.wall_image = image;
+            g_style.wall_mode = std::max<int64_t>(0, std::min<int64_t>(mode, 3));
+            vcn_repaint_all();
+            return 1;
+        }
+
+        int64_t vcn_wallpaper_set(int64_t mode) { if (!thread_ok()) return 0; return vcn_wallpaper_set_c(g_buf0.c_str(), mode); }
+        void vcn_wallpaper_clear(void) { if (!thread_ok()) return; g_style.wall_image.reset(); vcn_repaint_all(); }
+
+        // ---- stan rysowania pojedynczego okna ----
+        void vcn_window_set_alpha(int64_t h, int64_t permille)
+        {
+            if (!thread_ok()) return;
+            if (!surf(h)) return;
+            g_win[h].alpha = std::max<int64_t>(0, std::min<int64_t>(permille, 1000)) / 1000.0;
+            vcn_repaint_all();
+        }
+
+        void vcn_window_set_scale(int64_t h, int64_t permille)
+        {
+            if (!thread_ok()) return;
+            if (!surf(h)) return;
+            g_win[h].scale = std::max<int64_t>(50, std::min<int64_t>(permille, 2000)) / 1000.0;
+            vcn_repaint_all();
+        }
+
+        // enabled = 0 zdejmuje wlasny kolor ramki.
+        void vcn_window_set_border(int64_t h, int64_t argb, int64_t enabled)
+        {
+            if (!thread_ok()) return;
+            if (!surf(h)) return;
+            g_win[h].has_border = enabled != 0;
+            g_win[h].border = (uint32_t)argb;
+            vcn_repaint_all();
+        }
+
+        // ---- animacje: pozycja, krycie, skala; ease: 0 liniowo, 1 zwalnianie, 2 przyspieszanie, 3 gladko ----
+        static double anim_ease(int ease, double t)
+        {
+            t = std::max(0.0, std::min(1.0, t));
+            switch (ease)
+            {
+            case 1: return 1.0 - std::pow(1.0 - t, 3.0);
+            case 2: return t * t * t;
+            case 3: return t < 0.5 ? 4.0 * t * t * t : 1.0 - std::pow(-2.0 * t + 2.0, 3.0) / 2.0;
+            default: return t;
+            }
+        }
+
+        static void anim_start(const Anim &a)
+        {
+            g_anims.erase(std::remove_if(g_anims.begin(), g_anims.end(), [&](const Anim &o) { return o.h == a.h && o.kind == a.kind; }), g_anims.end());
+            g_anims.push_back(a);
+            vcn_repaint_all();
+        }
+
+        void vcn_anim_move(int64_t h, int64_t x, int64_t y, int64_t ms, int64_t ease)
+        {
+            if (!thread_ok()) return;
+            LSurface *s = surf(h);
+            if (!s) return;
+            if (ms <= 0)
+            {
+                vcn_surface_set_pos(h, x, y);
+                return;
+            }
+            anim_start(Anim { h, 0, (double)s->pos().x(), (double)s->pos().y(), (double)x, (double)y, std::chrono::steady_clock::now(), ms, (int)ease });
+        }
+
+        void vcn_anim_fade(int64_t h, int64_t to_permille, int64_t ms, int64_t ease)
+        {
+            if (!thread_ok()) return;
+            if (!surf(h)) return;
+            const double to = std::max<int64_t>(0, std::min<int64_t>(to_permille, 1000)) / 1000.0;
+            if (ms <= 0)
+            {
+                g_win[h].alpha = to;
+                vcn_repaint_all();
+                return;
+            }
+            anim_start(Anim { h, 1, g_win[h].alpha, 0, to, 0, std::chrono::steady_clock::now(), ms, (int)ease });
+        }
+
+        void vcn_anim_scale(int64_t h, int64_t to_permille, int64_t ms, int64_t ease)
+        {
+            if (!thread_ok()) return;
+            if (!surf(h)) return;
+            const double to = std::max<int64_t>(50, std::min<int64_t>(to_permille, 2000)) / 1000.0;
+            if (ms <= 0)
+            {
+                g_win[h].scale = to;
+                vcn_repaint_all();
+                return;
+            }
+            anim_start(Anim { h, 2, g_win[h].scale, 0, to, 0, std::chrono::steady_clock::now(), ms, (int)ease });
+        }
+
+        void vcn_anim_cancel(int64_t h)
+        {
+            if (!thread_ok()) return;
+            g_anims.erase(std::remove_if(g_anims.begin(), g_anims.end(), [&](const Anim &o) { return o.h == h; }), g_anims.end());
+        }
+
+        int64_t vcn_anim_active(void) { if (!thread_ok()) return 0; return (int64_t)g_anims.size(); }
+
+        // Krok animacji (wolany z vcn_dispatch); konczace sie animacje daja zdarzenie 98 (a = okno, b = rodzaj).
+        static void vcn_anim_tick(void)
+        {
+            if (g_anims.empty() || !g_comp)
+                return;
+            const auto now = std::chrono::steady_clock::now();
+            std::vector<Anim> keep;
+            for (const Anim &a : g_anims)
+            {
+                if (!surf_quiet(a.h))
+                {
+                    g_win.erase(a.h);
+                    continue;
+                }
+                const double t = std::chrono::duration<double, std::milli>(now - a.t0).count() / (double)a.dur;
+                const double e = anim_ease(a.ease, t);
+                if (a.kind == 0)
+                    vcn_surface_set_pos(a.h, (int64_t)std::llround(a.x0 + (a.x1 - a.x0) * e), (int64_t)std::llround(a.y0 + (a.y1 - a.y0) * e));
+                else if (a.kind == 1)
+                    g_win[a.h].alpha = a.x0 + (a.x1 - a.x0) * e;
+                else
+                    g_win[a.h].scale = a.x0 + (a.x1 - a.x0) * e;
+                if (t >= 1.0)
+                    push(98, a.h, a.kind);
+                else
+                    keep.push_back(a);
+            }
+            g_anims.swap(keep);
+            vcn_repaint_all();
+        }
+
+        // ---- kursor: ksztalt, motyw, obraz z pliku ----
+        // ksztalt wg protokolu cursor-shape (1 domyslny, 4 lapka, 9 tekst, 13 przenoszenie, 18..31 zmiana rozmiaru...).
+        void vcn_cursor_set_shape(int64_t shape)
+        {
+            if (!thread_ok()) return;
+            if (!g_comp) return;
+            if (shape < 1 || shape > 36)
+            {
+                set_error(VCN_E_ARG, "nieznany ksztalt kursora");
+                return;
+            }
+            g_comp->cursor()->setSource(LCursorSource::MakeShape(static_cast<CZCursorShape>(shape)));
+        }
+
+        int64_t vcn_cursor_set_theme_c(const char *name)
+        {
+            if (!thread_ok()) return 0;
+            if (!g_comp || !name || !*name)
+                return 0;
+            auto src = LCursorSource::MakeFromTheme(name);
+            if (!src)
+            {
+                set_error(VCN_E_IO, "brak kursora o tej nazwie w motywie");
+                return 0;
+            }
+            g_comp->cursor()->setSource(src);
+            return 1;
+        }
+
+        int64_t vcn_cursor_set_image_c(const char *path, int64_t hot_x, int64_t hot_y, int64_t size)
+        {
+            if (!thread_ok()) return 0;
+            if (!g_comp || !path || !*path)
+                return 0;
+            auto ream = RCore::Get();
+            if (!ream || !ream->mainDevice())
+                return 0;
+            auto format = ream->mainDevice()->textureFormats().formats().find(DRM_FORMAT_ARGB8888);
+            if (format == ream->mainDevice()->textureFormats().formats().end())
+                return 0;
+            const int32_t sz = (int32_t)std::max<int64_t>(0, std::min<int64_t>(size, 256));
+            auto image = RImage::LoadFile(path, *format, SkISize::Make(sz, sz));
+            if (!image)
+            {
+                set_error(VCN_E_IO, "nie mozna wczytac obrazu kursora");
+                return 0;
+            }
+            g_comp->cursor()->setSource(LCursorSource::Make(image, SkIPoint::Make((int32_t)hot_x, (int32_t)hot_y)));
+            return 1;
+        }
+
+        int64_t vcn_cursor_set_theme(void) { if (!thread_ok()) return 0; return vcn_cursor_set_theme_c(g_buf0.c_str()); }
+        int64_t vcn_cursor_set_image(int64_t hot_x, int64_t hot_y, int64_t size) { if (!thread_ok()) return 0; return vcn_cursor_set_image_c(g_buf0.c_str(), hot_x, hot_y, size); }
+        void vcn_cursor_reset(void) { if (!thread_ok()) return; if (g_comp) g_comp->cursor()->setSource({}); }
+
+        // ---- wirtualna klawiatura (zdarzenie klawisza wstrzykiwane do seata, np. z IPC lub ekranu dotykowego) ----
+        void vcn_keyboard_send_key(int64_t code, int64_t pressed)
+        {
+            if (!thread_ok()) return;
+            if (!g_comp || code < 0 || code > 767)
+            {
+                set_error(VCN_E_ARG, "zly kod klawisza");
+                return;
+            }
+            CZKeyboardKeyEvent e;
+            e.code = (UInt32)code;
+            e.isPressed = pressed != 0;
+            g_comp->seat()->keyboard()->keyEvent(e);
+        }
+
+        // ---- wyjscia: lustro, miekkie wygaszanie (DPMS), zrzut ekranu ----
+        // Wyswietla na `dst` obraz wyjscia `src` (z zachowaniem proporcji); src = 0 konczy lustro.
+        void vcn_output_mirror(int64_t dst, int64_t src)
+        {
+            if (!thread_ok()) return;
+            if (!outp(dst)) return;
+            if (src == 0)
+                g_mirror.erase(dst);
+            else if (outp(src) && src != dst)
+                g_mirror[dst] = src;
+            else
+            {
+                set_error(VCN_E_ARG, "zle wyjscie zrodlowe lustra");
+                return;
+            }
+            outp(dst)->repaint();
+        }
+
+        int64_t vcn_output_mirror_of(int64_t dst) { if (!thread_ok()) return 0; auto it = g_mirror.find(dst); return it == g_mirror.end() ? 0 : it->second; }
+
+        // Louvre nie udostepnia DPMS: wygaszamy rysujac czern i zerujac gamme (gdy wyjscie ja wspiera).
+        void vcn_output_set_blank(int64_t h, int64_t blank)
+        {
+            if (!thread_ok()) return;
+            LOutput *o = outp(h);
+            if (!o) return;
+            if (blank)
+                g_blank[h] = true;
+            else
+                g_blank.erase(h);
+            if (o->gammaSize() >= 2)
+                vcn_output_set_gamma_scale(h, blank ? 0 : 1000, blank ? 0 : 1000, blank ? 0 : 1000);
+            o->repaint();
+        }
+
+        int64_t vcn_output_is_blank(int64_t h) { if (!thread_ok()) return 0; return g_blank.count(h) ? 1 : 0; }
+
+        // Zapisuje ostatnia klatke wyjscia jako PNG; 1 przy powodzeniu.
+        int64_t vcn_output_screenshot_c(int64_t h, const char *path)
+        {
+            if (!thread_ok()) return 0;
+            LOutput *o = outp(h);
+            if (!o || !path || !*path)
+                return 0;
+            auto img = o->image();
+            if (!img)
+            {
+                set_error(VCN_E_STATE, "wyjscie nie ma jeszcze obrazu");
+                return 0;
+            }
+            const SkISize size = img->size();
+            std::vector<uint8_t> px((size_t)size.width() * (size_t)size.height() * 4u);
+            RPixelBufferRegion region {};
+            region.offset = SkIPoint::Make(0, 0);
+            region.stride = (UInt32)size.width() * 4u;
+            region.pixels = px.data();
+            region.region = SkRegion(SkIRect::MakeSize(size));
+            region.format = DRM_FORMAT_ABGR8888;      // w pamieci: R, G, B, A
+            if (!img->readPixels(region))
+            {
+                set_error(VCN_E_IO, "odczyt pikseli wyjscia nie powiodl sie");
+                return 0;
+            }
+            for (size_t i = 3; i < px.size(); i += 4)
+                px[i] = 255;
+            if (!vcn_png_write_rgba_c(path, size.width(), size.height(), px.data()))
+            {
+                set_error(VCN_E_IO, "zapis PNG nie powiodl sie");
+                return 0;
+            }
+            return 1;
+        }
+
+        int64_t vcn_output_screenshot(int64_t h) { if (!thread_ok()) return 0; return vcn_output_screenshot_c(h, g_buf0.c_str()); }
+
+
+        // ---- wersje buforowe dla HackerScript ----
+        int64_t vcn_layer_scope(int64_t h)
+        {
+            if (!thread_ok()) return 0;
+            LLayerRole *l = lay(h);
+            g_buf1 = l ? std::string(l->scope()) : std::string();
+            return (int64_t)g_buf1.size();
+        }
+
+        // Bufor 0: "uklad\nwariant\nopcje" (puste czesci oznaczaja domyslne).
+        int64_t vcn_keyboard_set_keymap(void)
+        {
+            if (!thread_ok()) return 0;
+            std::string parts[3];
+            size_t idx = 0;
+            for (char c : g_buf0)
+            {
+                if (c == '\n' && idx < 2)
+                    idx++;
+                else
+                    parts[idx].push_back(c);
+            }
+            return vcn_keyboard_set_keymap_c(parts[0].c_str(), parts[1].c_str(), parts[2].c_str());
+        }
+
+        // ---- odczyt buforow 0/1 (wyniki funkcji konfiguracji, IPC, bledow) ----
+        int64_t vcn_buf_len(int64_t slot) { if (!thread_ok()) return 0; return str_len(slot == 1 ? g_buf1 : g_buf0); }
+        int64_t vcn_buf_at(int64_t slot, int64_t i) { if (!thread_ok()) return 0; return str_at(slot == 1 ? g_buf1 : g_buf0, i); }
+
+        // BEGIN-STANDALONE (konfiguracja, IPC, procesy, pliki, PNG: tylko biblioteka standardowa + POSIX, testowane osobno)
+        // Funkcje tego bloku sa bezpieczne wzgledem watkow (muteksy), w odroznieniu od reszty shima.
+        static std::mutex g_sa_mx;
+
+        static const char *sring(const std::string &s)
+        {
+            static std::string pool[32];
+            static unsigned idx = 0;
+            std::string &slot = pool[idx++ % 32u];
+            slot = s;
+            return slot.c_str();
+        }
+
+        static std::string trim_str(const std::string &in)
+        {
+            size_t a = 0, b = in.size();
+            while (a < b && (in[a] == ' ' || in[a] == '\t' || in[a] == '\r'))
+                a++;
+            while (b > a && (in[b - 1] == ' ' || in[b - 1] == '\t' || in[b - 1] == '\r'))
+                b--;
+            return in.substr(a, b - a);
+        }
+
+        static std::map<std::string, std::string> g_cfg;
+
+        // Plik: linie klucz = wartosc, komentarze po # lub ;, sekcje [nazwa] daja prefiks nazwa.klucz.
+        int64_t vcn_config_load_c(const char *path)
+        {
+            if (!path)
+                return -1;
+            FILE *f = std::fopen(path, "r");
+            if (!f)
+                return -1;
+            std::lock_guard<std::mutex> lk(g_sa_mx);
+            std::string section;
+            std::string line;
+            int64_t loaded = 0;
+            int ch;
+            auto handle = [&](std::string raw)
+            {
+                std::string t = trim_str(raw);
+                if (t.empty() || t[0] == '#' || t[0] == ';')
+                    return;
+                if (t[0] == '[' && t.back() == ']')
+                {
+                    section = trim_str(t.substr(1, t.size() - 2));
+                    return;
+                }
+                size_t eq = t.find('=');
+                if (eq == std::string::npos)
+                    return;
+                std::string key = trim_str(t.substr(0, eq));
+                std::string val = trim_str(t.substr(eq + 1));
+                if (key.empty())
+                    return;
+                if (val.size() >= 2 && ((val.front() == '"' && val.back() == '"') || (val.front() == '\'' && val.back() == '\'')))
+                    val = val.substr(1, val.size() - 2);
+                else
+                {
+                    size_t hash = val.find(" #");
+                    if (hash != std::string::npos)
+                        val = trim_str(val.substr(0, hash));
+                }
+                g_cfg[section.empty() ? key : section + "." + key] = val;
+                loaded++;
+            };
+            while ((ch = std::fgetc(f)) != EOF)
+            {
+                if (ch == '\n')
+                {
+                    handle(line);
+                    line.clear();
+                }
+                else if (line.size() < 4096)
+                    line.push_back((char)ch);
+            }
+            if (!line.empty())
+                handle(line);
+            std::fclose(f);
+            return loaded;
+        }
+
+        int64_t vcn_config_has_c(const char *key)
+        {
+            std::lock_guard<std::mutex> lk(g_sa_mx);
+            return (key && g_cfg.count(key)) ? 1 : 0;
+        }
+
+        const char *vcn_config_get_c(const char *key)
+        {
+            std::lock_guard<std::mutex> lk(g_sa_mx);
+            auto it = key ? g_cfg.find(key) : g_cfg.end();
+            return sring(it == g_cfg.end() ? std::string() : it->second);
+        }
+
+        int64_t vcn_config_int_c(const char *key, int64_t def)
+        {
+            std::lock_guard<std::mutex> lk(g_sa_mx);
+            auto it = key ? g_cfg.find(key) : g_cfg.end();
+            if (it == g_cfg.end() || it->second.empty())
+                return def;
+            char *end = nullptr;
+            long long v = std::strtoll(it->second.c_str(), &end, 10);
+            return (end && *end == 0) ? (int64_t)v : def;
+        }
+
+        void vcn_config_set_c(const char *key, const char *value)
+        {
+            std::lock_guard<std::mutex> lk(g_sa_mx);
+            if (key)
+                g_cfg[key] = value ? value : "";
+        }
+
+        void vcn_config_clear(void)
+        {
+            std::lock_guard<std::mutex> lk(g_sa_mx);
+            g_cfg.clear();
+        }
+
+        int64_t vcn_config_count(void)
+        {
+            std::lock_guard<std::mutex> lk(g_sa_mx);
+            return (int64_t)g_cfg.size();
+        }
+
+        const char *vcn_config_key_at_c(int64_t i)
+        {
+            std::lock_guard<std::mutex> lk(g_sa_mx);
+            if (i < 0 || i >= (int64_t)g_cfg.size())
+                return sring(std::string());
+            auto it = g_cfg.begin();
+            std::advance(it, (long)i);
+            return sring(it->first);
+        }
+
+        // Wersje dla HackerScript: argumenty w buforze 0, wynik w buforze 1 (tylko z jednego watku).
+        int64_t vcn_config_load(void) { return vcn_config_load_c(g_buf0.c_str()); }
+
+        int64_t vcn_config_lookup(void)
+        {
+            std::lock_guard<std::mutex> lk(g_sa_mx);
+            auto it = g_cfg.find(g_buf0);
+            if (it == g_cfg.end())
+            {
+                g_buf1.clear();
+                return 0;
+            }
+            g_buf1 = it->second;
+            return 1;
+        }
+
+        int64_t vcn_config_lookup_int(int64_t def) { return vcn_config_int_c(g_buf0.c_str(), def); }
+
+        void vcn_config_store(void)
+        {
+            std::lock_guard<std::mutex> lk(g_sa_mx);
+            g_cfg[g_buf0] = g_buf1;
+        }
+
+        // ---- IPC: gniazdo UNIX, jedna linia polecenia na polaczenie ----
+        // Zabezpieczenia: tryb gniazda (domyslnie 0600), kontrola UID rozmowcy (SO_PEERCRED),
+        // opcjonalny token ("<token> polecenie"), limit dlugosci linii, limit polaczen na sekunde
+        // i limit czasu bezczynnego klienta. Odrzucone polaczenia sa liczone (vcn_ipc_stat).
+        static std::mutex g_ipc_mx;
+        static int g_ipc_listen = -1;
+        static int g_ipc_client = -1;
+        static std::string g_ipc_path;
+        static std::string g_ipc_inbuf;
+        static std::string g_ipc_line;
+        static std::string g_ipc_token;
+        static int64_t g_ipc_mode = 0600;
+        static std::vector<uid_t> g_ipc_uids;
+        static int64_t g_ipc_stats[5] = { 0, 0, 0, 0, 0 };
+        static std::deque<std::chrono::steady_clock::time_point> g_ipc_conns;
+        static std::chrono::steady_clock::time_point g_ipc_client_since;
+
+        static void ipc_drop_client(void)
+        {
+            if (g_ipc_client >= 0)
+                ::close(g_ipc_client);
+            g_ipc_client = -1;
+            g_ipc_inbuf.clear();
+        }
+
+        static void ipc_reject(const char *msg)
+        {
+            if (g_ipc_client >= 0)
+            {
+                std::string out = std::string(msg) + "\n";
+                (void)!::write(g_ipc_client, out.data(), out.size());
+                // Wyslij odpowiedz i oproznij nieodczytane dane, zeby close() nie wyslal RST,
+                // ktory moglby skasowac komunikat o bledzie po stronie klienta.
+                ::shutdown(g_ipc_client, SHUT_WR);
+                char sink[1024];
+                for (int i = 0; i < 64 && ::read(g_ipc_client, sink, sizeof(sink)) > 0; i++)
+                {
+                }
+            }
+            ipc_drop_client();
+        }
+
+        // Przed vcn_ipc_listen: tryb pliku gniazda (np. 0600, 0660).
+        void vcn_ipc_set_mode(int64_t mode) { std::lock_guard<std::mutex> lk(g_ipc_mx); g_ipc_mode = mode & 0777; }
+        // Dodatkowy UID, ktoremu wolno rozmawiac (poza wlascicielem procesu).
+        void vcn_ipc_allow_uid(int64_t uid) { std::lock_guard<std::mutex> lk(g_ipc_mx); g_ipc_uids.push_back((uid_t)uid); }
+        // Pusty token wylacza wymaganie tokenu.
+        void vcn_ipc_set_token_c(const char *token) { std::lock_guard<std::mutex> lk(g_ipc_mx); g_ipc_token = token ? token : ""; }
+        // 0 przyjete, 1 odrzucone UID, 2 odrzucone token, 3 za dluga linia, 4 limit polaczen.
+        int64_t vcn_ipc_stat(int64_t which) { std::lock_guard<std::mutex> lk(g_ipc_mx); return (which >= 0 && which < 5) ? g_ipc_stats[which] : 0; }
+
+        int64_t vcn_ipc_listen_c(const char *path)
+        {
+            std::lock_guard<std::mutex> lk(g_ipc_mx);
+            if (!path || !*path || std::strlen(path) >= sizeof(((sockaddr_un *)0)->sun_path))
+                return 0;
+            if (g_ipc_listen >= 0)
+                return 0;
+            int fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+            if (fd < 0)
+                return 0;
+            ::unlink(path);
+            sockaddr_un addr {};
+            addr.sun_family = AF_UNIX;
+            std::strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
+            mode_t old = ::umask(0177);
+            int rc = ::bind(fd, (sockaddr *)&addr, sizeof(addr));
+            ::umask(old);
+            if (rc != 0 || ::chmod(path, (mode_t)g_ipc_mode) != 0 || ::listen(fd, 8) != 0)
+            {
+                ::close(fd);
+                return 0;
+            }
+            g_ipc_listen = fd;
+            g_ipc_path = path;
+            for (auto &x : g_ipc_stats)
+                x = 0;
+            return 1;
+        }
+
+        int64_t vcn_ipc_fd(void)
+        {
+            std::lock_guard<std::mutex> lk(g_ipc_mx);
+            return g_ipc_listen;
+        }
+
+        // Zwraca 1, gdy jest nowe polecenie (odczytaj przez vcn_ipc_line_c i odpowiedz vcn_ipc_reply_c).
+        int64_t vcn_ipc_poll(void)
+        {
+            std::lock_guard<std::mutex> lk(g_ipc_mx);
+            if (g_ipc_listen < 0)
+                return 0;
+            const auto now = std::chrono::steady_clock::now();
+            if (g_ipc_client >= 0 && now - g_ipc_client_since > std::chrono::seconds(2))
+                ipc_drop_client();
+            if (g_ipc_client >= 0 && !g_ipc_line.empty())
+                return 1;
+            if (g_ipc_client < 0)
+            {
+                int c = ::accept4(g_ipc_listen, nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC);
+                if (c < 0)
+                    return 0;
+                g_ipc_client = c;
+                g_ipc_client_since = now;
+                g_ipc_inbuf.clear();
+                g_ipc_line.clear();
+                while (!g_ipc_conns.empty() && now - g_ipc_conns.front() > std::chrono::seconds(1))
+                    g_ipc_conns.pop_front();
+                if (g_ipc_conns.size() >= 200)
+                {
+                    g_ipc_stats[4]++;
+                    ipc_reject("error: za wiele polaczen");
+                    return 0;
+                }
+                g_ipc_conns.push_back(now);
+                ucred cred {};
+                socklen_t len = sizeof(cred);
+                bool ok = ::getsockopt(c, SOL_SOCKET, SO_PEERCRED, &cred, &len) == 0;
+                if (ok)
+                {
+                    ok = cred.uid == ::geteuid();
+                    for (uid_t u : g_ipc_uids)
+                        ok = ok || cred.uid == u;
+                }
+                if (!ok)
+                {
+                    g_ipc_stats[1]++;
+                    ipc_reject("error: brak uprawnien");
+                    return 0;
+                }
+            }
+            char tmp[512];
+            for (;;)
+            {
+                ssize_t n = ::read(g_ipc_client, tmp, sizeof(tmp));
+                if (n > 0)
+                {
+                    g_ipc_inbuf.append(tmp, (size_t)n);
+                    size_t nl = g_ipc_inbuf.find('\n');
+                    if (nl != std::string::npos)
+                    {
+                        std::string line = trim_str(g_ipc_inbuf.substr(0, nl));
+                        g_ipc_inbuf.clear();
+                        if (line.size() > 4096)
+                        {
+                            g_ipc_stats[3]++;
+                            ipc_reject("error: linia za dluga");
+                            return 0;
+                        }
+                        if (!g_ipc_token.empty())
+                        {
+                            const std::string prefix = g_ipc_token + " ";
+                            if (line.compare(0, prefix.size(), prefix) != 0)
+                            {
+                                g_ipc_stats[2]++;
+                                ipc_reject("error: brak autoryzacji");
+                                return 0;
+                            }
+                            line = trim_str(line.substr(prefix.size()));
+                        }
+                        g_ipc_line = line;
+                        g_ipc_stats[0]++;
+                        return 1;
+                    }
+                    if (g_ipc_inbuf.size() > 4096)
+                    {
+                        g_ipc_stats[3]++;
+                        ipc_reject("error: linia za dluga");
+                        return 0;
+                    }
+                    continue;
+                }
+                if (n == 0)
+                    ipc_drop_client();
+                break;
+            }
+            return 0;
+        }
+
+        const char *vcn_ipc_line_c(void)
+        {
+            std::lock_guard<std::mutex> lk(g_ipc_mx);
+            std::lock_guard<std::mutex> lk2(g_sa_mx);
+            return sring(g_ipc_line);
+        }
+
+        int64_t vcn_ipc_line(void)
+        {
+            std::lock_guard<std::mutex> lk(g_ipc_mx);
+            g_buf1 = g_ipc_line;
+            return (int64_t)g_buf1.size();
+        }
+
+        int64_t vcn_ipc_reply_c(const char *text)
+        {
+            std::lock_guard<std::mutex> lk(g_ipc_mx);
+            if (g_ipc_client < 0)
+                return 0;
+            std::string out = text ? text : "";
+            out.push_back('\n');
+            size_t off = 0;
+            while (off < out.size())
+            {
+                ssize_t n = ::write(g_ipc_client, out.data() + off, out.size() - off);
+                if (n > 0)
+                    off += (size_t)n;
+                else if (n < 0 && (errno == EAGAIN || errno == EINTR))
+                {
+                    pollfd pfd { g_ipc_client, POLLOUT, 0 };
+                    ::poll(&pfd, 1, 200);
+                }
+                else
+                    break;
+            }
+            ipc_drop_client();
+            g_ipc_line.clear();
+            return off == out.size() ? 1 : 0;
+        }
+
+        int64_t vcn_ipc_listen(void) { return vcn_ipc_listen_c(g_buf0.c_str()); }
+        int64_t vcn_ipc_reply(void) { return vcn_ipc_reply_c(g_buf0.c_str()); }
+        void vcn_ipc_set_token(void) { vcn_ipc_set_token_c(g_buf0.c_str()); }
+
+        void vcn_ipc_close(void)
+        {
+            std::lock_guard<std::mutex> lk(g_ipc_mx);
+            ipc_drop_client();
+            g_ipc_line.clear();
+            if (g_ipc_listen >= 0)
+            {
+                ::close(g_ipc_listen);
+                ::unlink(g_ipc_path.c_str());
+            }
+            g_ipc_listen = -1;
+        }
+
+        // ---- procesy: uruchamianie z numerem PID i odbior informacji o zakonczeniu ----
+        static std::mutex g_proc_mx;
+        static std::vector<pid_t> g_procs;
+        static int64_t g_proc_status = 0;
+
+        // Uruchamia `sh -c polecenie`; zwraca PID albo -1. Dziecko dostaje WAYLAND_DISPLAY kompozytora
+        // (z CZ_LOUVRE_WAYLAND_DISPLAY, jesli ustawione). Zakonczenie odbierz przez vcn_process_reap.
+        int64_t vcn_process_start_c(const char *command)
+        {
+            if (!command || !*command)
+                return -1;
+            std::lock_guard<std::mutex> lk(g_proc_mx);
+            pid_t pid = ::fork();
+            if (pid < 0)
+                return -1;
+            if (pid == 0)
+            {
+                ::setpgid(0, 0);
+                const char *disp = ::getenv("CZ_LOUVRE_WAYLAND_DISPLAY");
+                if (disp)
+                    ::setenv("WAYLAND_DISPLAY", disp, 1);
+                ::execl("/bin/sh", "sh", "-c", command, (char *)nullptr);
+                ::_exit(127);
+            }
+            g_procs.push_back(pid);
+            return (int64_t)pid;
+        }
+
+        // Odbiera jeden zakonczony proces z listy sledzonych: 1 gdy jest, *pid i *status
+        // (kod wyjscia albo 128 + numer sygnalu). Zwraca 0, gdy nic sie nie zakonczylo.
+        int64_t vcn_process_reap(int64_t *pid_out, int64_t *status_out)
+        {
+            std::lock_guard<std::mutex> lk(g_proc_mx);
+            for (size_t i = 0; i < g_procs.size(); i++)
+            {
+                int st = 0;
+                pid_t r = ::waitpid(g_procs[i], &st, WNOHANG);
+                if (r == g_procs[i] || (r < 0 && errno == ECHILD))
+                {
+                    int64_t code = WIFEXITED(st) ? WEXITSTATUS(st) : (WIFSIGNALED(st) ? 128 + WTERMSIG(st) : 0);
+                    if (pid_out)
+                        *pid_out = (int64_t)g_procs[i];
+                    if (status_out)
+                        *status_out = code;
+                    g_procs.erase(g_procs.begin() + (long)i);
+                    return 1;
+                }
+            }
+            return 0;
+        }
+
+        int64_t vcn_process_kill(int64_t pid, int64_t sig)
+        {
+            std::lock_guard<std::mutex> lk(g_proc_mx);
+            for (pid_t p : g_procs)
+                if ((int64_t)p == pid)
+                    return ::kill(-p, (int)sig) == 0 || ::kill(p, (int)sig) == 0 ? 1 : 0;
+            return 0;
+        }
+
+        int64_t vcn_process_count(void)
+        {
+            std::lock_guard<std::mutex> lk(g_proc_mx);
+            return (int64_t)g_procs.size();
+        }
+
+        // Wersje dla HackerScript: polecenie w buforze 0.
+        int64_t vcn_process_start(void) { return vcn_process_start_c(g_buf0.c_str()); }
+
+        // Zwraca PID zakonczonego procesu albo 0; kod wyjscia: vcn_process_status().
+        int64_t vcn_process_poll(void)
+        {
+            int64_t pid = 0, st = 0;
+            if (vcn_process_reap(&pid, &st) == 1)
+            {
+                g_proc_status = st;
+                return pid;
+            }
+            return 0;
+        }
+
+        int64_t vcn_process_status(void) { return g_proc_status; }
+
+        // ---- pliki ----
+        // Zapis atomowy (plik tymczasowy + rename); 1 przy powodzeniu.
+        int64_t vcn_file_write_c(const char *path, const char *data, int64_t len)
+        {
+            if (!path || !*path || len < 0 || (len > 0 && !data))
+                return 0;
+            std::string tmp = std::string(path) + ".tmp";
+            FILE *f = std::fopen(tmp.c_str(), "wb");
+            if (!f)
+                return 0;
+            bool ok = len == 0 || std::fwrite(data, 1, (size_t)len, f) == (size_t)len;
+            ok = (std::fclose(f) == 0) && ok;
+            if (!ok || std::rename(tmp.c_str(), path) != 0)
+            {
+                std::remove(tmp.c_str());
+                return 0;
+            }
+            return 1;
+        }
+
+        // Wersje dla HackerScript: sciezka w buforze 0, dane w buforze 1.
+        int64_t vcn_file_write(void) { return vcn_file_write_c(g_buf0.c_str(), g_buf1.data(), (int64_t)g_buf1.size()); }
+
+        // Czyta plik (sciezka w buforze 0, maks. 4 MiB) do bufora 1; zwraca dlugosc albo -1.
+        int64_t vcn_file_read(void)
+        {
+            FILE *f = std::fopen(g_buf0.c_str(), "rb");
+            if (!f)
+                return -1;
+            g_buf1.clear();
+            char tmp[4096];
+            size_t n;
+            while ((n = std::fread(tmp, 1, sizeof(tmp), f)) > 0 && g_buf1.size() < (4u << 20))
+                g_buf1.append(tmp, n);
+            std::fclose(f);
+            return (int64_t)g_buf1.size();
+        }
+
+        // ---- PNG bez zewnetrznych bibliotek (bloki deflate "stored") ----
+        static uint32_t png_crc(uint32_t crc, const uint8_t *p, size_t n)
+        {
+            static uint32_t table[256];
+            static bool ready = false;
+            if (!ready)
+            {
+                for (uint32_t i = 0; i < 256; i++)
+                {
+                    uint32_t c = i;
+                    for (int k = 0; k < 8; k++)
+                        c = (c & 1) ? 0xEDB88320u ^ (c >> 1) : c >> 1;
+                    table[i] = c;
+                }
+                ready = true;
+            }
+            crc = ~crc;
+            for (size_t i = 0; i < n; i++)
+                crc = table[(crc ^ p[i]) & 0xFF] ^ (crc >> 8);
+            return ~crc;
+        }
+
+        static void png_put32(std::string &o, uint32_t v)
+        {
+            o.push_back((char)(v >> 24));
+            o.push_back((char)(v >> 16));
+            o.push_back((char)(v >> 8));
+            o.push_back((char)v);
+        }
+
+        static void png_chunk(std::string &o, const char *type, const std::string &data)
+        {
+            png_put32(o, (uint32_t)data.size());
+            std::string body = std::string(type, 4) + data;
+            o += body;
+            png_put32(o, png_crc(0, (const uint8_t *)body.data(), body.size()));
+        }
+
+        // Zapisuje obraz RGBA (4 bajty na piksel, wiersz po wierszu, bez przerw) jako PNG; 1 przy powodzeniu.
+        int64_t vcn_png_write_rgba_c(const char *path, int64_t w, int64_t h, const uint8_t *rgba)
+        {
+            if (!path || w <= 0 || h <= 0 || w > 16384 || h > 16384 || !rgba)
+                return 0;
+            std::string raw;
+            raw.reserve((size_t)h * ((size_t)w * 4 + 1));
+            for (int64_t y = 0; y < h; y++)
+            {
+                raw.push_back(0);
+                raw.append((const char *)rgba + (size_t)y * (size_t)w * 4, (size_t)w * 4);
+            }
+            std::string z;
+            z.push_back((char)0x78);
+            z.push_back((char)0x01);
+            size_t pos = 0;
+            do
+            {
+                size_t n = std::min<size_t>(65535, raw.size() - pos);
+                bool last = pos + n >= raw.size();
+                z.push_back(last ? 1 : 0);
+                z.push_back((char)(n & 0xFF));
+                z.push_back((char)(n >> 8));
+                z.push_back((char)(~n & 0xFF));
+                z.push_back((char)((~n >> 8) & 0xFF));
+                z.append(raw, pos, n);
+                pos += n;
+            } while (pos < raw.size());
+            uint32_t a = 1, b = 0;
+            for (unsigned char c : raw)
+            {
+                a = (a + c) % 65521u;
+                b = (b + a) % 65521u;
+            }
+            png_put32(z, (b << 16) | a);
+            std::string out("\x89PNG\r\n\x1a\n", 8);
+            std::string ihdr;
+            png_put32(ihdr, (uint32_t)w);
+            png_put32(ihdr, (uint32_t)h);
+            ihdr.push_back(8);
+            ihdr.push_back(6);
+            ihdr.push_back(0);
+            ihdr.push_back(0);
+            ihdr.push_back(0);
+            png_chunk(out, "IHDR", ihdr);
+            png_chunk(out, "IDAT", z);
+            png_chunk(out, "IEND", std::string());
+            return vcn_file_write_c(path, out.data(), (int64_t)out.size());
+        }
+        // END-STANDALONE
+
+        // Wolane z vcn_dispatch: krok animacji (zdarzenie 98) i odbior zakonczonych procesow (zdarzenie 97: a = pid, b = status).
+        static void vcn_pump_hooks(void)
+        {
+            vcn_anim_tick();
+            int64_t pid = 0, st = 0;
+            while (vcn_process_reap(&pid, &st) == 1)
+                push(97, pid, st);
         }
         }
 
