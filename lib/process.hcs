@@ -1,0 +1,48 @@
+include <ffi>
+include <ffi_ext>
+include <text>
+
+!! Procesy uruchamiane przez kompozytor, z numerem PID i informacja o zakonczeniu.
+!! Zakonczenie przychodzi jako zdarzenie EV_PROCESS_EXIT (a = pid, b = kod wyjscia albo
+!! 128 + numer sygnalu) podczas compositor_dispatch; process_poll() odbiera je recznie.
+
+const SIGHUP: Int = 1
+const SIGINT: Int = 2
+const SIGKILL: Int = 9
+const SIGTERM: Int = 15
+
+!! Uruchamia `sh -c polecenie` z WAYLAND_DISPLAY kompozytora; zwraca PID albo -1.
+fun process_start(command: Str) -> Int [
+    ffi_buf_clear(0)
+    text_push(0, command)
+    end ffi_process_start()
+]
+
+!! Odbiera jeden zakonczony proces: jego PID albo 0 (kod wyjscia: process_status()).
+!! Uzywaj tylko, gdy nie odbierasz zdarzen EV_PROCESS_EXIT (zdarzenie i poll odbieraja ten sam proces).
+fun process_poll() -> Int [
+    end ffi_process_poll()
+]
+
+fun process_status() -> Int [
+    end ffi_process_status()
+]
+
+fun process_kill(pid: Int, signal: Int) -> Bool [
+    end ffi_process_kill(pid, signal) == 1
+]
+
+fun process_count() -> Int [
+    end ffi_process_count()
+]
+
+fun env_set(name: Str, value: Str, overwrite: Bool) -> Bool [
+    ffi_buf_clear(0)
+    ffi_buf_clear(1)
+    text_push(0, name)
+    text_push(1, value)
+    if overwrite [
+        end ffi_setenv(1) == 1
+    ]
+    end ffi_setenv(0) == 1
+]
