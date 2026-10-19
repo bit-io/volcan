@@ -1,0 +1,15 @@
+[package]
+-> name        => volcan-tiling-wm
+-> version     => 0.1.0
+-> description => Kafelkowy kompozytor na volcan: przestrzenie robocze, myszka, IPC, konfiguracja.
+-> lang        => hs
+
+[build]
+-> link => static
+
+[default-build]
+-> profile => release
+-> run     => false
+
+[dependencies]
+-> volcan => newest
