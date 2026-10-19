@@ -12,5 +12,4 @@
 -> run     => false
 
 [dependencies]
--> volcan
---> path => ../..
+-> volcan => newest
