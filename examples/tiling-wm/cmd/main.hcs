@@ -1,0 +1,317 @@
+using <0.5>
+
+!! Kafelkowy kompozytor na volcan. Pokazuje prawie wszystko, co daje biblioteka: zarzadce okien (wm.hcs)
+!! z przestrzeniami roboczymi, scratchpadem, ukladami (takze zakladki i stos), skroty z konfiguracji
+!! z trybami i sekwencjami (binds.hcs), reguly okien (rules.hcs), dekoracje po stronie serwera
+!! z klikalnymi przyciskami, zaokraglone rogi, cienie, tapete, animacje, ksztalty kursora, IPC,
+!! zapis stanu, XWayland przez xwayland-satellite oraz zrzuty ekranu.
+!!
+!! Domyslne skroty (Super = klawisz logo; wszystkie mozna zmienic w konfiguracji):
+!!   Super+Enter terminal   Super+Q zamknij   Super+J/K fokus   Super+H/L szerokosc mastera
+!!   Super+Space nastepny uklad   Super+T zakladki   Super+Shift+T stos   Super+E master-stack
+!!   Super+F plywajace   Super+S przyklejone   Super+minus scratchpad   Super+Shift+minus do scratchpada
+!!   Super+1..9 przestrzen   Super+Shift+1..9 wyslij okno   Super+O nastepne wyjscie
+!!   Super+U okno pilne   Super+Shift+Enter awansuj na master   Ctrl+Alt+Esc koniec
+!!   Super + lewy przycisk + ruch: przesun; Super + prawy + ruch: zmien rozmiar;
+!!   pasek tytulowy: przeciaganie, przyciski zamknij / maksymalizuj / minimalizuj.
+!!
+!! IPC: `printf 'layout grid\n' | nc -U $XDG_RUNTIME_DIR/volcan-tiling.sock`
+!! (polecenia z wm_command oraz: quit, screenshot SCIEZKA, wallpaper SCIEZKA).
+!!
+!! Konfiguracja ~/.config/volcan/tiling.conf, np.:
+!!   terminal = foot
+!!   wallpaper = /home/ja/tapeta.png
+!!   follow_mouse = 1
+!!   xwayland = 1
+!!   [style]
+!!   border = 2
+!!   radius = 10
+!!   shadow = 24
+!!   deco = 1
+!!   [rules]
+!!   float = pavucontrol
+!!   bind.20 = Super+x, c : spawn firefox
+!!   rule.1 = app_id=notes title=Scratch* => scratchpad
+get <bit:volcan>
+get <std:env> import <env_var_or>
+
+!! BEGIN-LOGIC (ta czesc jest testowana na atrapie: tests/hcs/example_tiling.hcs)
+
+struct Tw [
+    wm: Wm,
+    binds: Binds,
+    grab: Grab,
+    quit: Bool,
+    terminal: Str,
+    xwl: Xwl
+]
+
+struct TwReply [
+    tw: Tw,
+    reply: Str
+]
+
+!! Nowy stan; domyslne skroty sa instalowane, jesli konfiguracja nie ma wlasnych (bind.1).
+fun tw_new(terminal: Str) -> Tw [
+    binds_install_defaults(terminal)
+    let w = wm_new()
+    w = wm_set_follow_mouse(w, config_bool("follow_mouse", false))
+    end Tw(w, binds_load(), grab_none(), false, terminal, Xwl(-1, "", false))
+]
+
+fun tw_apply(t: Tw) -> Tw [
+    let r = t.clone()
+    r.wm = wm_arrange(t.wm)
+    wm_apply_focus(r.wm)
+    end r
+]
+
+!! Akcja ze skrotu albo z IPC: quit, screenshot, wallpaper albo dowolne polecenie wm_command.
+fun tw_action(t: Tw, action: Str) -> TwReply [
+    let words = str_words(action)
+    let cmd = ""
+    if words.len() > 0 [
+        cmd = str_lower(words[0].clone())
+    ]
+    if cmd == "quit" [
+        let q = t.clone()
+        q.quit = true
+        end TwReply(q, "ok")
+    ]
+    if cmd == "screenshot" [
+        let path = str_words_from(action, 1)
+        let outs = output_list()
+        if path == "" or outs.len() == 0 [
+            end TwReply(t.clone(), "error: screenshot SCIEZKA")
+        ]
+        if output_screenshot(outs[0], path) [
+            end TwReply(t.clone(), "ok")
+        ]
+        end TwReply(t.clone(), "error: zrzut nie powiodl sie: " + status_last().message)
+    ]
+    if cmd == "wallpaper" [
+        let path = str_words_from(action, 1)
+        if path != "" and wallpaper_set(path, WALL_FILL) [
+            end TwReply(t.clone(), "ok")
+        ]
+        end TwReply(t.clone(), "error: wallpaper SCIEZKA")
+    ]
+    let res = wm_command(t.wm, action, output_list().len())
+    let r = t.clone()
+    r.wm = res.wm.clone()
+    end TwReply(r, res.reply.clone())
+]
+
+fun tw_key(t: Tw, code: Int) -> Tw [
+    let res = binds_key(t.binds, mods_now(), code)
+    let r = t.clone()
+    r.binds = res.binds.clone()
+    if res.action != "" [
+        r = tw_action(r, res.action).tw.clone()
+    ]
+    end r
+]
+
+!! Krawedzie do zmiany rozmiaru wybrane wg polozenia kursora wzgledem srodka okna.
+fun tw_edges(h: Int) -> Int [
+    let edges = 0
+    if cursor_ix() < surface_x(h) + surface_width(h) / 2 [
+        edges = edges + EDGE_LEFT
+    ] else [
+        edges = edges + EDGE_RIGHT
+    ]
+    if cursor_iy() < surface_y(h) + surface_height(h) / 2 [
+        edges = edges + EDGE_TOP
+    ] else [
+        edges = edges + EDGE_BOTTOM
+    ]
+    end edges
+]
+
+!! Klik na dekoracji okna: przyciski i pasek tytulowy (przeciaganie).
+fun tw_deco_click(t: Tw, hit: DecoHit) -> Tw [
+    let r = t.clone()
+    let h = hit.handle
+    r.wm = wm_focus(t.wm, h)
+    if hit.part == DECO_PART_CLOSE [
+        toplevel_close(h)
+    ]
+    if hit.part == DECO_PART_MINIMIZE [
+        toplevel_set_minimized(h, true)
+    ]
+    if hit.part == DECO_PART_MAXIMIZE [
+        let idx = wm_index(t.wm, h)
+        if idx >= 0 and t.wm.mode[idx] == WMODE_MAXIMIZED [
+            r.wm = wm_restore_mode(r.wm, h)
+            toplevel_set_maximized(h, false)
+        ] else [
+            r.wm = wm_set_mode(r.wm, h, WMODE_MAXIMIZED)
+            toplevel_set_maximized(h, true)
+        ]
+    ]
+    if hit.part == DECO_PART_TITLE [
+        r.wm = wm_set_mode(r.wm, h, WMODE_FLOATING)
+        r.grab = grab_begin_move(h)
+        cursor_shape(CURSOR_MOVE)
+    ]
+    end r
+]
+
+fun tw_press(t: Tw, button: Int) -> Tw [
+    let r = t.clone()
+    let hit = deco_hit_at_cursor()
+    if hit.handle != 0 and wm_has(t.wm, hit.handle) and hit.part != DECO_PART_NONE and button == BTN_LEFT [
+        end tw_deco_click(t, hit)
+    ]
+    let under = wm_root(surface_under_cursor())
+    if under == 0 or not wm_has(t.wm, under) [
+        end r
+    ]
+    r.wm = wm_focus(t.wm, under)
+    if chord_is(MOD_SUPER) and (button == BTN_LEFT or button == BTN_RIGHT) [
+        r.wm = wm_set_mode(r.wm, under, WMODE_FLOATING)
+        if button == BTN_LEFT [
+            r.grab = grab_begin_move(under)
+            cursor_shape(CURSOR_MOVE)
+        ] else [
+            let edges = tw_edges(under)
+            r.grab = grab_begin_resize(under, edges)
+            cursor_shape(cursor_for_edges(edges))
+        ]
+    ]
+    end r
+]
+
+!! Jedno zdarzenie: skroty, mysz, dekoracje, zarzadca okien, animacje, procesy, rozlozenie.
+fun tw_event(t: Tw, ev: Event) -> Tw [
+    let r = t.clone()
+    let k = ev.kind
+    if k == EV_POINTER_MOVE [
+        if grab_active(t.grab) [
+            grab_update(t.grab)
+        ] else [
+            r.wm = wm_pointer_focus(t.wm)
+            if r.wm.focus != t.wm.focus [
+                wm_apply_focus(r.wm)
+            ]
+        ]
+        end r
+    ]
+    if k == EV_KEY and ev.b == 1 [
+        r = tw_key(r, ev.a)
+    ]
+    if k == EV_POINTER_BUTTON [
+        if ev.b == 1 [
+            r = tw_press(r, ev.a)
+        ] else [
+            if grab_active(r.grab) [
+                cursor_reset()
+            ]
+            r.grab = grab_none()
+        ]
+    ]
+    if k == EV_PROCESS_EXIT [
+        r.xwl = xwayland_on_exit(r.xwl, ev.a)
+    ]
+    r.wm = wm_handle(r.wm, ev)
+    if k == EV_SURFACE_MAPPED and surface_role(ev.a) == ROLE_TOPLEVEL [
+        anim_open(ev.a, 160)
+        if deco_bar_height() > 0 [
+            toplevel_set_decoration(ev.a, DECORATION_SERVER)
+        ]
+    ]
+    if k == EV_KEY or k == EV_POINTER_BUTTON or wm_needs_arrange(k) [
+        r = tw_apply(r)
+    ]
+    end r
+]
+
+!! Polecenie z IPC.
+fun tw_ipc(t: Tw, line: Str) -> TwReply [
+    let res = tw_action(t, line)
+    end TwReply(tw_apply(res.tw), res.reply.clone())
+]
+
+!! Zapis i odczyt stanu zarzadcy.
+fun tw_save(t: Tw, path: Str) -> Bool [
+    end wm_state_save(t.wm, path)
+]
+
+fun tw_restore(t: Tw, path: Str) -> Tw [
+    let r = t.clone()
+    r.wm = wm_state_restore(t.wm, path)
+    end r
+]
+
+!! END-LOGIC
+
+fun tw_style() [
+    style_enable(true)
+    style_background(rgb(24, 26, 33))
+    style_border(config_int("style.border", 2), rgb(76, 154, 255), rgb(60, 63, 72))
+    style_radius(config_int("style.radius", 10))
+    style_shadow(config_int("style.shadow", 24), 0, 8, argb(140, 0, 0, 0))
+    if config_bool("style.deco", true) [
+        deco_enable(DECO_ALL)
+        deco_style(28, 14, rgb(43, 47, 58), rgb(30, 32, 40), rgb(230, 230, 230), rgb(138, 143, 155))
+    ]
+    if config_has("wallpaper") [
+        if not wallpaper_set(config_get("wallpaper", ""), WALL_FILL) [
+            log("tapeta:", compositor_last_error())
+        ]
+    ]
+    end
+]
+
+fun tw_load_config() [
+    let home = env_var_or("HOME", "/root")
+    let n = config_load(home + "/.config/volcan/tiling.conf")
+    if n >= 0 [
+        log("konfiguracja:", n, "kluczy")
+    ]
+    end
+]
+
+fun main() [
+    log("volcan", VOLCAN_VERSION, "(Louvre", VOLCAN_LOUVRE + ")")
+    if not compositor_boot("volcan-tiling") [
+        log("nie udalo sie wystartowac kompozytora:", compositor_last_error())
+        end
+    ]
+    compositor_manual_policy(true)
+    tw_load_config()
+    tw_style()
+    let terminal = config_get("terminal", env_var_or("VOLCAN_TERMINAL", "foot"))
+    let state_path = env_var_or("XDG_STATE_HOME", env_var_or("HOME", "/root") + "/.local/state") + "/volcan-tiling.state"
+    let sock = env_var_or("XDG_RUNTIME_DIR", "/tmp") + "/volcan-tiling.sock"
+    if not ipc_listen(sock) [
+        log("IPC wylaczone (nie mozna otworzyc", sock + ")")
+    ]
+    let t = tw_restore(tw_new(terminal), state_path)
+    if config_bool("xwayland", false) [
+        t.xwl = xwayland_start(":1", "xwayland-satellite")
+        log("XWayland (xwayland-satellite) pid", t.xwl.pid)
+    ]
+    process_start(terminal)
+    while compositor_running() and not t.quit [
+        compositor_dispatch(10)
+        let ev = event_next()
+        while ev.kind != EV_NONE [
+            t = tw_event(t, ev)
+            ev = event_next()
+        ]
+        if ipc_poll() [
+            let res = tw_ipc(t, ipc_line())
+            t = res.tw.clone()
+            ipc_reply(res.reply.clone())
+        ]
+    ]
+    tw_save(t, state_path)
+    if t.xwl.running [
+        xwayland_stop(t.xwl)
+    ]
+    ipc_close()
+    compositor_stop()
+    compositor_destroy()
+    end
+]
