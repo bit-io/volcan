@@ -1,0 +1,66 @@
+include <events>
+include <surface>
+include <output>
+include <ipc>
+include <wm>
+include <layout>
+
+!! Linie zdarzen dla subskrybentow IPC (ipc_subscribe / `volcanctl subscribe`). Jedna linia = jedno
+!! zdarzenie, pola rozdzielone spacja; app_id i tytul na koncu rozdzielone tabulatorem:
+!!
+!!   window_open UCHWYT APP_ID<TAB>TYTUL     window_close UCHWYT     title UCHWYT<TAB>TYTUL
+!!   focus UCHWYT|0                           workspace N (od 1)       layout NAZWA
+!!   output_add NAZWA                         output_remove UCHWYT     urgent UCHWYT
+
+!! Linia dla zdarzenia kompozytora albo "" gdy zdarzenie nie jest publikowane.
+fun ipc_event_line(ev: Event) -> Str [
+    if ev.kind == EV_SURFACE_MAPPED and surface_role(ev.a) == ROLE_TOPLEVEL [
+        end "window_open " + (ev.a as Str) + " " + toplevel_app_id(ev.a) + "\t" + toplevel_title(ev.a)
+    ]
+    if ev.kind == EV_SURFACE_UNMAPPED or ev.kind == EV_SURFACE_DESTROYED [
+        end "window_close " + (ev.a as Str)
+    ]
+    if ev.kind == EV_TOPLEVEL_TITLE [
+        end "title " + (ev.a as Str) + "\t" + toplevel_title(ev.a)
+    ]
+    if ev.kind == EV_ACTIVE_TOPLEVEL [
+        end "focus " + (ev.a as Str)
+    ]
+    if ev.kind == EV_ACTIVATE_REQUEST [
+        end "urgent " + (ev.a as Str)
+    ]
+    if ev.kind == EV_OUTPUT_PLUGGED [
+        end "output_add " + output_name(ev.a)
+    ]
+    if ev.kind == EV_OUTPUT_UNPLUGGED [
+        end "output_remove " + (ev.a as Str)
+    ]
+    end ""
+]
+
+!! Publikuje zdarzenie kompozytora; zwraca liczbe odbiorcow (0, gdy nic nie wyslano).
+fun ipc_publish_event(ev: Event) -> Int [
+    if ipc_subscriber_count() == 0 [
+        end 0
+    ]
+    let line = ipc_event_line(ev)
+    if line == "" [
+        end 0
+    ]
+    end ipc_publish(line)
+]
+
+!! Publikuje zmiany stanu zarzadcy miedzy `before` a `after` (przestrzen robocza, uklad).
+fun ipc_publish_wm_diff(before: Wm, after: Wm) -> Int [
+    let sent = 0
+    if ipc_subscriber_count() == 0 [
+        end 0
+    ]
+    if before.current != after.current [
+        sent = sent + ipc_publish("workspace " + ((after.current + 1) as Str))
+    ]
+    if before.wlayout[before.current] != after.wlayout[after.current] [
+        sent = sent + ipc_publish("layout " + layout_name(after.wlayout[after.current]))
+    ]
+    end sent
+]
