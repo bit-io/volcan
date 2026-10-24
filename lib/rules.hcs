@@ -9,7 +9,7 @@ include <config>
 !!   rule.4 = title=Scratch* => scratchpad
 !!
 !! Przed `=>` warunki (app_id=WZORZEC, title=WZORZEC, oba musza pasowac; brak = dowolny), po `=>` akcje:
-!! float, tile, workspace=N (1..9), output=N (od 1), fullscreen, maximize, sticky, scratchpad.
+!! float, tile, workspace=N (1..9), output=N (od 1), fullscreen, maximize, sticky, scratchpad, ontop (zawsze na wierzchu, ponad aktywnym oknem).
 !! Wzorce: * dowolny ciag, ? dowolny znak; wartosci bez spacji. Pasujace reguly sumuja sie
 !! (pozniejsza nadpisuje wczesniejsza). Zgodnosc wsteczna: rules.float = lista app_id plywajacych.
 
@@ -23,11 +23,12 @@ struct RuleAct [
     fullscreen: Int,
     maximize: Int,
     sticky: Int,
-    scratch: Int
+    scratch: Int,
+    ontop: Int
 ]
 
 fun rule_none() -> RuleAct [
-    end RuleAct(false, -1, -1, -1, 0, 0, 0, 0)
+    end RuleAct(false, -1, -1, -1, 0, 0, 0, 0, 0)
 ]
 
 !! Czy pojedyncza regula (tekst po `=`) pasuje do okna; actions: tekst akcji zapisany w `out_actions`.
@@ -87,6 +88,9 @@ fun rule_apply_actions(act: RuleAct, actions: Str) -> RuleAct [
         ]
         if w == "scratchpad" [
             r.scratch = 1
+        ]
+        if w == "ontop" [
+            r.ontop = 1
         ]
         if str_starts_with(w, "workspace=") [
             let n = str_int(str_sub(w, 10, str_len(w)), 0)
