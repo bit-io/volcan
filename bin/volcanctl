@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""volcanctl - klient IPC kompozytora zbudowanego na volcan (odpowiednik swaymsg).
+
+  volcanctl POLECENIE...            wysyla jedno polecenie (np. `workspace 2`, `layout dwindle`) i drukuje odpowiedz
+  volcanctl subscribe [ZDARZENIA]   zostaje polaczony i drukuje zdarzenia (jedna linia = jedno zdarzenie)
+  volcanctl caps                    zdolnosci shima (polecenie `caps` po stronie kompozytora)
+
+Gniazdo: $VOLCAN_SOCK albo $XDG_RUNTIME_DIR/volcan.sock. Token (jesli kompozytor go wymaga):
+$VOLCAN_TOKEN albo plik wskazany przez $VOLCAN_TOKEN_FILE. ZDARZENIA to lista nazw rozdzielona
+przecinkami (window_open,window_close,title,focus,workspace,layout,output_add,output_remove,urgent);
+bez listy - wszystkie. Kod wyjscia: 0 ok, 1 odpowiedz zaczyna sie od `error`, 2 brak polaczenia.
+"""
+import os, socket, sys
+
+def sock_path():
+    p = os.environ.get("VOLCAN_SOCK")
+    if p:
+        return p
+    d = os.environ.get("XDG_RUNTIME_DIR")
+    if not d:
+        sys.exit("volcanctl: ustaw VOLCAN_SOCK albo XDG_RUNTIME_DIR")
+    return os.path.join(d, "volcan.sock")
+
+def token():
+    t = os.environ.get("VOLCAN_TOKEN", "")
+    f = os.environ.get("VOLCAN_TOKEN_FILE")
+    if not t and f:
+        try:
+            t = open(f).read().strip()
+        except OSError as e:
+            sys.exit(f"volcanctl: nie mozna odczytac {f}: {e.strerror}")
+    return t
+
+def connect():
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        s.connect(sock_path())
+    except OSError as e:
+        print(f"volcanctl: nie mozna polaczyc z {sock_path()}: {e.strerror}", file=sys.stderr)
+        sys.exit(2)
+    return s
+
+def send_line(s, line):
+    t = token()
+    if t:
+        line = t + " " + line
+    s.sendall((line + "\n").encode())
+
+def lines(s):
+    buf = b""
+    while True:
+        chunk = s.recv(4096)
+        if not chunk:
+            if buf:
+                yield buf.decode(errors="replace")
+            return
+        buf += chunk
+        while b"\n" in buf:
+            ln, buf = buf.split(b"\n", 1)
+            yield ln.decode(errors="replace")
+
+def one_shot(cmd):
+    s = connect()
+    send_line(s, cmd)
+    out = list(lines(s))
+    s.close()
+    text = "\n".join(out)
+    if text:
+        print(text)
+    return 1 if text.startswith("error") else 0
+
+def subscribe(filt):
+    s = connect()
+    send_line(s, "subscribe")
+    first = True
+    wanted = {w for w in filt.split(",") if w} if filt else None
+    try:
+        for ln in lines(s):
+            if first:
+                first = False
+                if ln != "ok":
+                    print(ln, file=sys.stderr)
+                    return 1
+                continue
+            if wanted is None or ln.split(" ", 1)[0].split("\t", 1)[0] in wanted:
+                print(ln, flush=True)
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help"):
+        print(__doc__.strip())
+        return 0
+    if argv[0] == "subscribe":
+        return subscribe(argv[1] if len(argv) > 1 else "")
+    return one_shot(" ".join(argv))
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
