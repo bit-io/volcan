@@ -1,0 +1,228 @@
+include <wm>
+include <config>
+include <strings>
+include <caps>
+
+!! Rozszerzenia zarzadcy okien: historia fokusu (Alt+Tab), zamiana okien miejscami, nazwane przestrzenie
+!! robocze, przenoszenie okna na inne wyjscie i blokada ekranu. Dzialaja na `Wm` z wm.hcs (bez zmiany jego
+!! struktury): wmx_command(...) obsluguje polecenia, ktorych nie zna wm_command, a reszte przekazuje dalej.
+!!
+!!   focus mru [N]                 N-te ostatnio uzywane okno (domyslnie 1 = poprzednie; przelaczanie tam i z powrotem)
+!!   swap next|prev                zamienia fokusowane okno z nastepnym/poprzednim kafelkiem tej przestrzeni
+!!   workspace NAZWA | send NAZWA  przestrzenie nazwane w konfiguracji: workspace.1 = www, workspace.2 = code
+!!   workspaces                    lista `1:www 2:code 3:3 ...`
+!!   move output next|N            przenosi fokusowane okno na kolejne wyjscie / wyjscie N (od 1)
+!!   lock                          uruchamia program z klucza `locker` (domyslnie swaylock)
+
+!! ---- historia fokusu (MRU): lista uchwytow, najnowszy pierwszy ----
+
+fun mru_touch(mru: List<Int>, h: Int) -> List<Int> [
+    let out: List<Int> = []
+    if h == 0 [
+        end mru.clone()
+    ]
+    out.push(h)
+    let i = 0
+    while i < mru.len() [
+        if mru[i] != h [
+            out.push(mru[i])
+        ]
+        i = i + 1
+    ]
+    end out
+]
+
+fun mru_remove(mru: List<Int>, h: Int) -> List<Int> [
+    let out: List<Int> = []
+    let i = 0
+    while i < mru.len() [
+        if mru[i] != h [
+            out.push(mru[i])
+        ]
+        i = i + 1
+    ]
+    end out
+]
+
+!! N-te (od 0 = bieżące) okno z historii, ktore jest zarzadzane i widoczne; 0, gdy nie ma tylu.
+fun mru_pick(w: Wm, mru: List<Int>, n: Int) -> Int [
+    let seen = 0
+    let i = 0
+    while i < mru.len() [
+        let h = mru[i]
+        let idx = wm_index(w, h)
+        if idx >= 0 and wm_shown(w, idx) [
+            if seen == n [
+                end h
+            ]
+            seen = seen + 1
+        ]
+        i = i + 1
+    ]
+    end 0
+]
+
+!! ---- zamiana okien ----
+
+fun wmx_lswap(a: List<Int>, i: Int, j: Int) -> List<Int> [
+    let out: List<Int> = []
+    let k = 0
+    while k < a.len() [
+        if k == i [
+            out.push(a[j])
+        ] elif k == j [
+            out.push(a[i])
+        ] else [
+            out.push(a[k])
+        ]
+        k = k + 1
+    ]
+    end out
+]
+
+!! Zamienia miejscami okna o indeksach i i j (kolejnosc w ukladzie); atrybuty podazaja za oknami.
+fun wmx_swap_idx(w: Wm, i: Int, j: Int) -> Wm [
+    let r = w.clone()
+    if i < 0 or j < 0 or i >= w.handles.len() or j >= w.handles.len() or i == j [
+        end r
+    ]
+    r.handles = wmx_lswap(w.handles, i, j)
+    r.ws = wmx_lswap(w.ws, i, j)
+    r.mode = wmx_lswap(w.mode, i, j)
+    r.outs = wmx_lswap(w.outs, i, j)
+    r.hid = wmx_lswap(w.hid, i, j)
+    r.sticky = wmx_lswap(w.sticky, i, j)
+    r.urgent = wmx_lswap(w.urgent, i, j)
+    r.scratch = wmx_lswap(w.scratch, i, j)
+    r.ruled = wmx_lswap(w.ruled, i, j)
+    end r
+]
+
+fun wmx_tiled_here(w: Wm, i: Int, ref: Int) -> Bool [
+    end w.mode[i] == WMODE_TILED and wm_shown(w, i) and w.outs[i] == w.outs[ref]
+]
+
+!! Zamiana fokusowanego okna z nastepnym (step = 1) albo poprzednim (step = -1) kafelkiem; cyklicznie.
+fun wmx_swap(w: Wm, step: Int) -> Wm [
+    let me = wm_index(w, w.focus)
+    if me < 0 or not wmx_tiled_here(w, me, me) [
+        end w.clone()
+    ]
+    let n = w.handles.len()
+    let k = 1
+    while k < n [
+        let j = (me + step * k + n * n) % n
+        if wmx_tiled_here(w, j, me) [
+            end wmx_swap_idx(w, me, j)
+        ]
+        k = k + 1
+    ]
+    end w.clone()
+]
+
+!! ---- nazwane przestrzenie ----
+
+!! Numer przestrzeni (0..8) o nazwie `name` z kluczy workspace.N albo -1. Liczba 1..9 tez jest przyjmowana.
+fun wmx_ws_index(name: Str) -> Int [
+    let n = 1
+    while n <= WM_WORKSPACES [
+        if config_get("workspace." + (n as Str), "") == name [
+            end n - 1
+        ]
+        n = n + 1
+    ]
+    let v = str_int(name, 0)
+    if v >= 1 and v <= WM_WORKSPACES [
+        end v - 1
+    ]
+    end -1
+]
+
+fun wmx_ws_name(n: Int) -> Str [
+    let name = config_get("workspace." + ((n + 1) as Str), "")
+    if name == "" [
+        end (n + 1) as Str
+    ]
+    end name
+]
+
+fun wmx_ws_list() -> Str [
+    let out = ""
+    let n = 0
+    while n < WM_WORKSPACES [
+        if n > 0 [
+            out = out + " "
+        ]
+        out = out + ((n + 1) as Str) + ":" + wmx_ws_name(n)
+        n = n + 1
+    ]
+    end out
+]
+
+!! ---- polecenia ----
+
+fun wmx_command(w: Wm, mru: List<Int>, line: Str, outs: Int) -> WmResult [
+    let words = str_words(line)
+    if words.len() == 0 [
+        end wm_ok(w.clone())
+    ]
+    let cmd = words[0].clone()
+    let arg = ""
+    if words.len() > 1 [
+        arg = words[1].clone()
+    ]
+    if cmd == "workspaces" [
+        end WmResult(w.clone(), wmx_ws_list())
+    ]
+    if (cmd == "workspace" or cmd == "send") and arg != "" and arg != "next" and arg != "prev" and str_int(arg, 0) == 0 [
+        let n = wmx_ws_index(arg)
+        if n < 0 [
+            end wm_err(w, "nieznana przestrzen: " + arg)
+        ]
+        end wm_command(w, cmd + " " + ((n + 1) as Str), outs)
+    ]
+    if cmd == "focus" and arg == "mru" [
+        let n = 1
+        if words.len() > 2 [
+            n = str_int(words[2].clone(), 1)
+        ]
+        let h = mru_pick(w, mru, n)
+        if h == 0 [
+            end wm_ok(w.clone())
+        ]
+        end wm_ok(wm_with_focus(w, h))
+    ]
+    if cmd == "swap" [
+        if arg == "next" [
+            end wm_ok(wmx_swap(w, 1))
+        ]
+        if arg == "prev" [
+            end wm_ok(wmx_swap(w, -1))
+        ]
+        end wm_err(w, "swap next|prev")
+    ]
+    if cmd == "move" and arg == "output" [
+        let idx = wm_index(w, w.focus)
+        if idx < 0 or outs < 1 [
+            end wm_ok(w.clone())
+        ]
+        let target = 0
+        let what = ""
+        if words.len() > 2 [
+            what = words[2].clone()
+        ]
+        if what == "next" [
+            target = (w.outs[idx] + 1) % outs
+        ] else [
+            target = str_int(what, 0) - 1
+        ]
+        if target < 0 or target >= outs [
+            end wm_err(w, "move output next|1.." + (outs as Str))
+        ]
+        end wm_ok(wm_send_output(w, w.focus, target))
+    ]
+    if cmd == "lock" [
+        end wm_command(w, "spawn " + config_get("locker", "swaylock"), outs)
+    ]
+    end wm_command(w, line, outs)
+]
