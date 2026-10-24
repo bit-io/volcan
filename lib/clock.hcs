@@ -1,0 +1,15 @@
+include <ffi_ext>
+include <text>
+
+!! Zegar: milisekundy monotoniczne i czas lokalny wg strftime.
+fun clock_now_ms() -> Int [
+    end ffi_now_ms()
+]
+
+!! Czas lokalny w formacie strftime, np. clock_format("%H:%M") -> "21:07".
+fun clock_format(fmt: Str) -> Str [
+    ffi_buf_clear(0)
+    text_push(0, fmt)
+    ffi_strftime()
+    end text_read(4, 0)
+]
