@@ -1,0 +1,752 @@
+include <ffi>
+include <ffi_ext>
+include <text>
+include <compositor>
+include <events>
+include <config>
+include <strings>
+include <surface>
+include <output>
+include <input>
+include <keys>
+include <style>
+include <files>
+include <process>
+include <xwayland>
+include <wm>
+include <wmx>
+include <binds>
+include <grab>
+include <gestures>
+include <ipc>
+include <ipc_events>
+include <state>
+include <input_cfg>
+include <outputs_cfg>
+include <startup>
+include <bar>
+include <screencopy>
+include <i3>
+include <idle>
+
+get <std:env> import <env_var_or>
+
+!! Zmienna srodowiskowa albo wartosc domyslna.
+fun app_env(name: Str, fallback: Str) -> Str [
+    end env_var_or(name, fallback)
+]
+
+!! Wysokopoziomowa fasada w stylu Canonical MirAL: caly kompozytor to opis (App) + jedno wywolanie.
+!!
+!!   fun main() [
+!!       volcan_run(app_standard(app_new("moj-wm"), "foot"))
+!!   ]
+!!
+!! `volcan_run` robi to, co przyklad tiling-wm robil recznie (~190 linii): start Louvre, konfiguracja z pliku,
+!! wejscie (XKB, libinput) i wyjscia, zarzadca okien, skroty z trybami, reguly okien, przesuwanie okien
+!! myszka, gesty, IPC z subskrypcjami, zapis stanu, pasek stanu, XWayland, autostart, hooki zdarzen,
+!! przeladowanie konfiguracji w locie (plik jest obserwowany, polecenie `reload`).
+!!
+!! W odroznieniu od MirAL nie ma tu sztywnej polityki: caly stan to zwykle struktury, a petla moze byc
+!! Twoja - volcan_start / volcan_step / volcan_finish. Po kazdym kroku v.events zawiera zdarzenia, ktore
+!! krok obsluzyl, wiec wlasna logike dopisujesz obok wbudowanej (albo zamiast niej, przez `app_manual`).
+!!
+!! Kolejnosc waznosci: plik konfiguracyjny > to, co ustawil kod (app_*) > wartosci domyslne biblioteki.
+!! Skroty, reguly i wyjscia z kodu sa dopisywane PO tych z pliku (pierwszy pasujacy wiersz wygrywa).
+
+struct App [
+    name: Str,
+    config: Str,
+    terminal: Str,
+    gap: Int,
+    layout: Str,
+    state_file: Str,
+    ipc: Str,
+    xwayland: Str,
+    bar: Bool,
+    standard: Bool,
+    watch: Bool,
+    manual: Bool,
+    binds: List<Str>,
+    rules: List<Str>,
+    outputs: List<Str>,
+    autostart: List<Str>,
+    hooks: List<Str>,
+    extras: List<Str>
+]
+
+fun app_new(name: Str) -> App [
+    let empty_a: List<Str> = []
+    let empty_b: List<Str> = []
+    let empty_c: List<Str> = []
+    let empty_d: List<Str> = []
+    let empty_e: List<Str> = []
+    let empty_f: List<Str> = []
+    end App(name, "", "foot", 8, "", "", "", "", false, false, true, false, empty_a, empty_b, empty_c, empty_d, empty_e, empty_f)
+]
+
+!! Plik konfiguracyjny (domyslnie $VOLCAN_CONFIG, potem ~/.config/volcan/NAZWA.conf).
+fun app_config(a: App, path: Str) -> App [
+    let r = a.clone()
+    r.config = path
+    end r
+]
+
+fun app_terminal(a: App, command: Str) -> App [
+    let r = a.clone()
+    r.terminal = command
+    end r
+]
+
+fun app_gap(a: App, gap: Int) -> App [
+    let r = a.clone()
+    r.gap = gap
+    end r
+]
+
+!! Uklad startowy wszystkich przestrzeni: master, columns, grid, monocle, tabbed, stacked, dwindle, centered, scroll.
+fun app_layout(a: App, name: Str) -> App [
+    let r = a.clone()
+    r.layout = name
+    end r
+]
+
+fun app_state_file(a: App, path: Str) -> App [
+    let r = a.clone()
+    r.state_file = path
+    end r
+]
+
+!! Gniazdo IPC (domyslnie $XDG_RUNTIME_DIR/NAZWA.sock).
+fun app_ipc(a: App, socket: Str) -> App [
+    let r = a.clone()
+    r.ipc = socket
+    end r
+]
+
+!! XWayland: "satellite" (xwayland-satellite, okna X11 jako osobne okna) albo "rootful" (caly pulpit X11 w oknie).
+fun app_xwayland(a: App, mode: Str) -> App [
+    let r = a.clone()
+    r.xwayland = mode
+    end r
+]
+
+!! Pasek stanu rysowany przez kompozytor (bar.hcs).
+fun app_bar(a: App, on: Bool) -> App [
+    let r = a.clone()
+    r.bar = on
+    end r
+]
+
+!! Obserwowanie pliku konfiguracyjnego i przeladowanie przy zmianie (domyslnie wlaczone).
+fun app_watch(a: App, on: Bool) -> App [
+    let r = a.clone()
+    r.watch = on
+    end r
+]
+
+!! Tryb reczny: volcan_run tylko uruchamia i konfiguruje, a petla zdarzen (volcan_step) ma wykonywac
+!! Twoj kod. Bez tego volcan_run sam prowadzi petle do zakonczenia kompozytora.
+fun app_manual(a: App, on: Bool) -> App [
+    let r = a.clone()
+    r.manual = on
+    end r
+]
+
+!! Standardowy zestaw skrotow (Super+Enter terminal, Super+1..9, uklady, Alt-Tab itd.) i terminal.
+fun app_standard(a: App, terminal: Str) -> App [
+    let r = a.clone()
+    r.standard = true
+    r.terminal = terminal
+    end r
+]
+
+!! Skrot: "Super+Return : spawn {terminal}". {terminal} jest podmieniane na program z app_terminal.
+fun app_bind(a: App, spec: Str) -> App [
+    let r = a.clone()
+    r.binds.push(spec)
+    end r
+]
+
+!! Regula okna: "app_id=pavucontrol => float".
+fun app_rule(a: App, spec: Str) -> App [
+    let r = a.clone()
+    r.rules.push(spec)
+    end r
+]
+
+!! Wiersz konfiguracji wyjsc: "DP-1 mode=2560x1440@144 pos=0,0" (patrz outputs_cfg.hcs).
+fun app_output(a: App, spec: Str) -> App [
+    let r = a.clone()
+    r.outputs.push(spec)
+    end r
+]
+
+!! Program uruchamiany po starcie kompozytora.
+fun app_autostart(a: App, command: Str) -> App [
+    let r = a.clone()
+    r.autostart.push(command)
+    end r
+]
+
+!! Hook: polecenie wm_command (np. "spawn notify-send {title}") wykonywane przy zdarzeniu. Nazwy zdarzen jak
+!! event_name() (surface_mapped, active_toplevel, ...) oraz `workspace` i `layout` przy zmianie stanu.
+!! Podstawienia: {handle} {app_id} {title} {workspace}.
+fun app_hook(a: App, event: Str, command: Str) -> App [
+    let r = a.clone()
+    r.hooks.push(event + "|" + command)
+    end r
+]
+
+!! Dowolny klucz konfiguracji z kodu (wartosc domyslna; plik konfiguracyjny ma pierwszenstwo), np. app_set(a, "anim.open_ms", "160").
+fun app_set(a: App, key: Str, value: Str) -> App [
+    let r = a.clone()
+    r.extras.push(key + "=" + value)
+    end r
+]
+
+!! Animacje: przesuniecie okien przy zmianie ukladu i wejscie nowego okna (milisekundy, 0 = bez animacji).
+fun app_animations(a: App, move_ms: Int, open_ms: Int) -> App [
+    end app_set(app_set(a, "anim.move_ms", (move_ms as Str)), "anim.open_ms", (open_ms as Str))
+]
+
+!! Udostepnianie ekranu (ext-image-copy-capture-v1), domyslnie wlaczone.
+fun app_screencopy(a: App, on: Bool) -> App [
+    if on [
+        end app_set(a, "screencopy", "on")
+    ]
+    end app_set(a, "screencopy", "off")
+]
+
+!! ---- stan uruchomionego kompozytora ----
+
+struct Volcan [
+    app: App,
+    ok: Bool,
+    wm: Wm,
+    binds: Binds,
+    grab: Grab,
+    gest: Gesture,
+    xwl: Xwl,
+    xrestarts: Int,
+    mru: List<Int>,
+    events: List<Event>,
+    config_path: Str
+]
+
+struct VolcanReply [
+    v: Volcan,
+    reply: Str
+]
+
+fun app_replace(s: Str, needle: Str, rep: Str) -> Str [
+    let out = ""
+    let rest = s
+    let guard = 0
+    while guard < 32 [
+        let p = str_find(rest, needle, 0)
+        if p < 0 [
+            end out + rest
+        ]
+        out = out + str_sub(rest, 0, p) + rep
+        rest = str_sub(rest, p + str_len(needle), str_len(rest))
+        guard = guard + 1
+    ]
+    end out + rest
+]
+
+fun app_config_path(a: App) -> Str [
+    if a.config != "" [
+        end a.config
+    ]
+    let home = app_env("HOME", "")
+    end app_env("VOLCAN_CONFIG", home + "/.config/volcan/" + a.name + ".conf")
+]
+
+!! Dodatkowe skroty dolaczane do standardowych (volcan wykonuje je przez wmx_command).
+fun app_standard_extras() -> List<Str> [
+    end ["Super+Tab : focus mru", "Super+Shift+j : swap next", "Super+Shift+k : swap prev", "Super+d : layout dwindle", "Super+c : layout centered", "Super+g : layout scroll", "Super+Shift+r : reload", "Super+Shift+l : lock", "Super+Shift+o : move output next", "Super+Right : workspace next", "Super+Left : workspace prev"]
+]
+
+!! Wczytuje plik + wartosci z kodu i stosuje wejscie, wyjscia i skroty. Wolane przy starcie i `reload`.
+!! Zwraca liczbe kluczy wczytanych z pliku albo -1 (wtedy dzialaja same domyslne).
+fun app_apply_config(a: App, path: Str) -> Int [
+    config_clear()
+    let keys = config_load(path)
+    config_default("terminal", a.terminal)
+    config_default("gap", (a.gap as Str))
+    let xi = 0
+    while xi < a.extras.len() [
+        let kv = a.extras[xi].clone()
+        let eq = str_find(kv, "=", 0)
+        if eq > 0 [
+            config_default(str_sub(kv, 0, eq), str_sub(kv, eq + 1, str_len(kv)))
+        ]
+        xi = xi + 1
+    ]
+    if a.layout != "" [
+        config_default("layout", a.layout)
+    ]
+    if a.state_file != "" [
+        config_default("state_file", a.state_file)
+    ]
+    if a.bar [
+        config_default("bar.enabled", "true")
+    ]
+    let term = config_get("terminal", a.terminal)
+    if a.standard [
+        let had_binds = config_has("bind.1")
+        binds_install_defaults(term)
+        if not had_binds [
+            let ex = app_standard_extras()
+            let i = 0
+            while i < ex.len() [
+                config_append("bind", ex[i].clone())
+                i = i + 1
+            ]
+        ]
+    ]
+    let i = 0
+    while i < a.binds.len() [
+        config_append("bind", app_replace(a.binds[i].clone(), "{terminal}", term))
+        i = i + 1
+    ]
+    i = 0
+    while i < a.rules.len() [
+        config_append("rule", a.rules[i].clone())
+        i = i + 1
+    ]
+    i = 0
+    while i < a.outputs.len() [
+        config_append("output", a.outputs[i].clone())
+        i = i + 1
+    ]
+    i = 0
+    while i < a.hooks.len() [
+        let h = a.hooks[i].clone()
+        let bar = str_find(h, "|", 0)
+        if bar > 0 [
+            config_default("hook." + str_sub(h, 0, bar), str_sub(h, bar + 1, str_len(h)))
+        ]
+        i = i + 1
+    ]
+    end keys
+]
+
+fun app_set_layouts(w: Wm) -> Wm [
+    let r = w.clone()
+    let kind = layout_from_name(config_get("layout", ""))
+    if kind >= 0 [
+        let k = 0
+        while k < WM_WORKSPACES [
+            r.wlayout[k] = kind
+            k = k + 1
+        ]
+    ]
+    r.gap = config_int("gap", r.gap)
+    end r
+]
+
+fun app_ipc_path(a: App) -> Str [
+    if a.ipc != "" [
+        end a.ipc
+    ]
+    let forced = app_env("VOLCAN_SOCK", "")
+    if forced != "" [
+        end forced
+    ]
+    end app_env("XDG_RUNTIME_DIR", "/tmp") + "/" + a.name + ".sock"
+]
+
+fun app_start_xwayland(a: App, current: Xwl) -> Xwl [
+    let display = config_get("xwayland.display", ":1")
+    let mode = config_get("xwayland", a.xwayland)
+    if mode == "satellite" [
+        end xwayland_start(display, config_get("xwayland.program", "xwayland-satellite"))
+    ]
+    if mode == "rootful" [
+        end xwayland_start_rootful(display)
+    ]
+    end current.clone()
+]
+
+!! Uruchamia kompozytor wg `a`. v.ok == false, gdy Louvre nie wystartowal (powod w logu i compositor_last_error()).
+fun volcan_start(a: App) -> Volcan [
+    let no_events: List<Event> = []
+    let no_mru: List<Int> = []
+    let xnone = Xwl(-1, ":1", false)
+    let path = app_config_path(a)
+    if not compositor_boot(a.name) [
+        log(a.name + ": nie udalo sie wystartowac:", compositor_last_error())
+        end Volcan(a.clone(), false, wm_new(), binds_load(), grab_none(), gesture_new(), xnone, 0, no_mru, no_events, path)
+    ]
+    compositor_manual_policy(true)
+    style_enable(true)
+    let keys = app_apply_config(a, path)
+    if config_get("screencopy", "on") != "off" [
+        screencopy_enable()
+    ]
+    if keys < 0 [
+        log(a.name + ": brak pliku konfiguracyjnego", path, "- uzywam ustawien z kodu")
+    ]
+    log(a.name, "volcan", VOLCAN_VERSION, "| zdolnosci:", volcan_caps_line())
+    let rep = input_apply_checked()
+    let e = 0
+    while e < rep.errors.len() [
+        log("konfiguracja wejscia:", rep.errors[e].clone())
+        e = e + 1
+    ]
+    outputs_apply()
+    let w = app_set_layouts(wm_new())
+    let state_file = config_get("state_file", "")
+    if state_file != "" [
+        w = wm_state_restore(w, state_file)
+    ]
+    let sock = app_ipc_path(a)
+    if config_has("ipc.token") [
+        ffi_buf_clear(0)
+        text_push(0, config_get("ipc.token", ""))
+        ffi_ipc_set_token()
+    ]
+    if not ipc_listen(sock) [
+        log("IPC wylaczone: nie mozna otworzyc", sock)
+    ]
+    if config_get("i3.enabled", "on") != "off" [
+        let i3sock = config_get("i3.socket", sock + ".i3")
+        if i3_listen(i3sock) [
+            compositor_setenv("SWAYSOCK", i3sock, true)
+            compositor_setenv("I3SOCK", i3sock, true)
+        ] else [
+            log("IPC zgodne z sway/i3 wylaczone: nie mozna otworzyc", i3sock)
+        ]
+    ]
+    if a.watch and keys >= 0 [
+        ffi_buf_clear(0)
+        text_push(0, path)
+        ffi_watch_set()
+    ]
+    let xwl = app_start_xwayland(a, xnone)
+    let started = 0
+    let i = 0
+    while i < a.autostart.len() [
+        compositor_spawn(a.autostart[i].clone())
+        started = started + 1
+        i = i + 1
+    ]
+    let n = 1
+    while config_has("autostart." + (n as Str)) [
+        compositor_spawn(config_get("autostart." + (n as Str), ""))
+        started = started + 1
+        n = n + 1
+    ]
+    if started == 0 [
+        compositor_spawn(config_get("terminal", a.terminal))
+    ]
+    bar_draw(w)
+    end Volcan(a.clone(), true, w, binds_load(), grab_none(), gesture_new(), xwl, 0, no_mru, no_events, path)
+]
+
+fun volcan_running(v: Volcan) -> Bool [
+    end v.ok and compositor_running()
+]
+
+!! Przeladowuje konfiguracje (plik, wejscie, wyjscia, skroty, uklad, pasek) bez restartu.
+fun volcan_reload(v: Volcan) -> Volcan [
+    let r = v.clone()
+    let keys = app_apply_config(v.app, v.config_path)
+    if keys < 0 [
+        log("reload: nie mozna odczytac", v.config_path)
+    ]
+    let rep = input_apply_checked()
+    let e = 0
+    while e < rep.errors.len() [
+        log("konfiguracja wejscia:", rep.errors[e].clone())
+        e = e + 1
+    ]
+    outputs_apply()
+    r.binds = binds_load()
+    r.wm = app_set_layouts(v.wm)
+    r.wm = wm_arrange(r.wm)
+    bar_draw(r.wm)
+    end r
+]
+
+!! Wykonuje polecenie (skrot, gest, IPC, hook). `reload`, `quit`, `devices` i `get KLUCZ` obsluguje
+!! fasada; reszta idzie przez wmx_command / wm_command.
+fun volcan_command(v: Volcan, line: Str) -> VolcanReply [
+    let words = str_words(line)
+    if words.len() == 0 [
+        end VolcanReply(v.clone(), "")
+    ]
+    let cmd = words[0].clone()
+    if cmd == "reload" [
+        end VolcanReply(volcan_reload(v), "ok reload")
+    ]
+    if cmd == "quit" [
+        compositor_stop()
+        end VolcanReply(v.clone(), "ok quit")
+    ]
+    if cmd == "outputs" and words.len() > 1 and (words[1] == "off" or words[1] == "on") [
+        let outs = output_list()
+        let oi = 0
+        while oi < outs.len() [
+            output_blank(outs[oi], words[1] == "off")
+            oi = oi + 1
+        ]
+        end VolcanReply(v.clone(), "ok")
+    ]
+    if cmd == "devices" [
+        end VolcanReply(v.clone(), input_devices())
+    ]
+    if cmd == "get" and words.len() > 1 [
+        end VolcanReply(v.clone(), config_get(words[1].clone(), ""))
+    ]
+    let res = wmx_command(v.wm, v.mru, line, output_list().len())
+    let r = v.clone()
+    r.wm = res.wm.clone()
+    end VolcanReply(r, res.reply)
+]
+
+fun volcan_run_action(v: Volcan, action: Str) -> Volcan [
+    if action == "" [
+        end v.clone()
+    ]
+    let res = volcan_command(v, action)
+    if str_starts_with(res.reply, "error") [
+        log("polecenie", action, "->", res.reply)
+    ]
+    end res.v.clone()
+]
+
+fun app_hook_line(ev: Event) -> Str [
+    let cmd = config_get("hook." + event_name(ev.kind), "")
+    if cmd == "" [
+        end ""
+    ]
+    let out = app_replace(cmd, "{handle}", (ev.a as Str))
+    if surface_role(ev.a) == ROLE_TOPLEVEL [
+        out = app_replace(out, "{app_id}", toplevel_app_id(ev.a))
+        out = app_replace(out, "{title}", toplevel_title(ev.a))
+    ]
+    end out
+]
+
+!! Jeden obieg petli: zdarzenia, skroty, gesty, mysz, IPC, obserwator pliku, uklad, pasek, publikacja zmian.
+!! Zdarzenia obsluzone w tym kroku sa w wyniku w `events` (do wlasnej logiki).
+fun volcan_step(v0: Volcan) -> Volcan [
+    let v = v0.clone()
+    let seen: List<Event> = []
+    compositor_dispatch(10)
+    let before = v.wm.clone()
+    let dirty = false
+    let ev = event_next()
+    while ev.kind != EV_NONE [
+        seen.push(ev)
+        ipc_publish_event(ev)
+        if ev.kind == EV_KEY or ev.kind == EV_POINTER_MOVE or ev.kind == EV_POINTER_BUTTON or ev.kind == EV_POINTER_AXIS [
+            let resume = idle_touch()
+            if resume != "" [
+                v = volcan_run_action(v, resume)
+            ]
+        ]
+        v.wm = wm_handle(v.wm, ev)
+        if ffi_i3_clients() > 0 [
+            if ev.kind == EV_SURFACE_MAPPED and surface_role(ev.a) == ROLE_TOPLEVEL [
+                i3_publish(I3_EV_WINDOW, i3_window_event(v.wm, "new", ev.a))
+            ]
+            if ev.kind == EV_SURFACE_UNMAPPED [
+                i3_publish(I3_EV_WINDOW, i3_window_event(v.wm, "close", ev.a))
+            ]
+            if ev.kind == EV_ACTIVE_TOPLEVEL and ev.a != 0 [
+                i3_publish(I3_EV_WINDOW, i3_window_event(v.wm, "focus", ev.a))
+            ]
+            if ev.kind == EV_TOPLEVEL_TITLE [
+                i3_publish(I3_EV_WINDOW, i3_window_event(v.wm, "title", ev.a))
+            ]
+        ]
+        if wm_needs_arrange(ev.kind) [
+            dirty = true
+        ]
+        if ev.kind == EV_ACTIVE_TOPLEVEL [
+            v.mru = mru_touch(v.mru, ev.a)
+        ]
+        if ev.kind == EV_SURFACE_UNMAPPED or ev.kind == EV_SURFACE_DESTROYED [
+            v.mru = mru_remove(v.mru, ev.a)
+        ]
+        if ev.kind == EV_OUTPUT_PLUGGED or ev.kind == EV_OUTPUT_UNPLUGGED [
+            outputs_apply()
+            dirty = true
+        ]
+        if ev.kind == EV_INPUT_DEVICE_PLUGGED [
+            log("urzadzenie wejsciowe:", ev_text())
+        ]
+        if ev.kind == EV_PROCESS_EXIT [
+            v.xwl = xwayland_on_exit(v.xwl, ev.a)
+            if not v.xwl.running and ev.a == v.xwl.pid and v.xrestarts < 5 [
+                log("xwayland zakonczyl sie, restart", (v.xrestarts + 1) as Str)
+                v.xrestarts = v.xrestarts + 1
+                v.xwl = app_start_xwayland(v.app, v.xwl)
+            ]
+        ]
+        if ev.kind == EV_KEY and ev.b == 1 [
+            let r = binds_key(v.binds, mods_xkb(), ev.a)
+            v.binds = r.binds.clone()
+            if r.action != "" [
+                v = volcan_run_action(v, r.action)
+                dirty = true
+            ]
+        ]
+        if ev.kind == EV_POINTER_BUTTON [
+            if ev.b == 1 and key_pressed(KEY_LEFTMETA) [
+                let under = wm_root(surface_under_cursor())
+                if under != 0 and wm_has(v.wm, under) [
+                    v.wm = wm_set_mode(v.wm, under, WMODE_FLOATING)
+                    if ev.a == BTN_LEFT [
+                        v.grab = grab_begin_move(under)
+                    ]
+                    if ev.a == BTN_RIGHT [
+                        v.grab = grab_begin_resize(under, EDGE_RIGHT + EDGE_BOTTOM)
+                    ]
+                    dirty = true
+                ]
+            ]
+            if ev.b == 0 [
+                v.grab = grab_none()
+            ]
+        ]
+        if ev.kind == EV_POINTER_MOVE [
+            if grab_active(v.grab) [
+                grab_update(v.grab)
+            ] else [
+                v.wm = wm_pointer_focus(v.wm)
+            ]
+        ]
+        if ev.kind == EV_SWIPE_BEGIN or ev.kind == EV_SWIPE_UPDATE or ev.kind == EV_SWIPE_END [
+            v.gest = gesture_feed(v.gest, ev)
+            if ev.kind == EV_SWIPE_END [
+                v = volcan_run_action(v, gesture_command(v.gest, ev))
+                dirty = true
+            ]
+        ]
+        let hook = app_hook_line(ev)
+        if hook != "" [
+            v = volcan_run_action(v, hook)
+            dirty = true
+        ]
+        ev = event_next()
+    ]
+    while ipc_poll() [
+        let line = ipc_line()
+        if line == "subscribe" [
+            if not ipc_subscribe() [
+                ipc_reply("error: nie mozna subskrybowac (limit albo brak klienta)")
+            ]
+        ] else [
+            let res = volcan_command(v, line)
+            v = res.v.clone()
+            ipc_reply(res.reply)
+            dirty = true
+        ]
+    ]
+    let due = idle_due()
+    if due != "" [
+        v = volcan_run_action(v, due)
+        dirty = true
+    ]
+    let refresh = config_int("bar.refresh_s", 0)
+    if refresh > 0 and config_bool("bar.enabled", false) [
+        let tnow = clock_now_ms()
+        if tnow - config_int("bar._last", 0) >= refresh * 1000 [
+            config_set("bar._last", (tnow as Str))
+            bar_draw(v.wm)
+        ]
+    ]
+    while i3_poll() [
+        let kind = i3_type()
+        let payload = i3_payload()
+        if kind == I3_GET_WORKSPACES [
+            i3_reply(i3_workspaces_json(v.wm))
+        ] elif kind == I3_GET_OUTPUTS [
+            i3_reply(i3_outputs_json(v.wm))
+        ] elif kind == I3_GET_TREE [
+            i3_reply(i3_tree_json(v.wm))
+        ] elif kind == I3_RUN_COMMAND [
+            let cmds = i3_split_commands(payload)
+            let reply = "["
+            let ci = 0
+            while ci < cmds.len() [
+                let line = i3_translate(cmds[ci].clone())
+                if ci > 0 [
+                    reply = reply + ","
+                ]
+                if line == "" [
+                    reply = reply + "{\"success\":false,\"error\":\"nieobslugiwane polecenie\"}"
+                ] else [
+                    let res = volcan_command(v, line)
+                    v = res.v.clone()
+                    if str_starts_with(res.reply, "error") [
+                        reply = reply + "{\"success\":false,\"error\":" + i3_json(res.reply) + "}"
+                    ] else [
+                        reply = reply + "{\"success\":true}"
+                    ]
+                    dirty = true
+                ]
+                ci = ci + 1
+            ]
+            i3_reply(reply + "]")
+        ] else [
+            i3_reply("{}")
+        ]
+    ]
+    if v.app.watch and ffi_watch_poll() == 1 [
+        log("konfiguracja zmieniona - przeladowuje")
+        v = volcan_reload(v)
+        dirty = true
+    ]
+    if dirty [
+        v.wm = wm_arrange(v.wm)
+        wm_apply_focus(v.wm)
+        ipc_publish_wm_diff(before, v.wm)
+        if before.current != v.wm.current and ffi_i3_clients() > 0 [
+            i3_publish(I3_EV_WORKSPACE, i3_workspace_event(v.wm, before.current, v.wm.current))
+        ]
+        bar_draw(v.wm)
+        if before.current != v.wm.current [
+            let h = config_get("hook.workspace", "")
+            if h != "" [
+                v = volcan_run_action(v, app_replace(h, "{workspace}", ((v.wm.current + 1) as Str)))
+            ]
+        ]
+    ]
+    v.events = seen
+    end v
+]
+
+!! Zapisuje stan, zamyka IPC i niszczy kompozytor.
+fun volcan_finish(v: Volcan) [
+    let sf = config_get("state_file", "")
+    if sf != "" and v.ok [
+        wm_state_save(v.wm, sf)
+    ]
+    ffi_watch_close()
+    i3_close()
+    ipc_close()
+    compositor_destroy()
+    end
+]
+
+!! Uruchamia kompozytor i prowadzi petle do jego zakonczenia (chyba ze app_manual). Zwraca 0 albo 1 przy bledzie startu.
+fun volcan_run(a: App) -> Int [
+    let v = volcan_start(a)
+    if not v.ok [
+        end 1
+    ]
+    if a.manual [
+        end 0
+    ]
+    while volcan_running(v) [
+        v = volcan_step(v)
+    ]
+    volcan_finish(v)
+    end 0
+]
