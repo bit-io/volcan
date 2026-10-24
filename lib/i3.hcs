@@ -1,0 +1,305 @@
+include <ffi_ext>
+include <text>
+include <strings>
+include <wm>
+include <wmx>
+include <output>
+include <surface>
+include <layout>
+include <bar>
+
+!! Zgodnosc z IPC sway/i3: dzialaja `swaymsg`, `i3-msg` i moduly sway/i3 w waybarze. Gniazdo ustawia app.hcs
+!! ($SWAYSOCK i $I3SOCK). Obslugiwane od reki przez shim: SUBSCRIBE, GET_VERSION, GET_MARKS, GET_BAR_CONFIG,
+!! GET_BINDING_MODES, GET_CONFIG, SEND_TICK, SYNC. Skrypt odpowiada na RUN_COMMAND, GET_WORKSPACES, GET_OUTPUTS i GET_TREE.
+!! Drzewo jest uproszczone (root, wyjscia, przestrzenie, okna); wspolrzedne okien w pikselach. Prawdziwego i3/sway
+!! nie udajemy: brak mark, bar config, bindings i splitow.
+
+const I3_RUN_COMMAND: Int = 0
+const I3_GET_WORKSPACES: Int = 1
+const I3_GET_OUTPUTS: Int = 3
+const I3_GET_TREE: Int = 4
+
+const I3_EV_WORKSPACE: Int = 0
+const I3_EV_OUTPUT: Int = 1
+const I3_EV_WINDOW: Int = 3
+
+fun i3_listen(path: Str) -> Bool [
+    ffi_buf_clear(0)
+    text_push(0, path)
+    end ffi_i3_listen() == 1
+]
+
+fun i3_poll() -> Bool [
+    end ffi_i3_poll() == 1
+]
+
+fun i3_type() -> Int [
+    end ffi_i3_type()
+]
+
+fun i3_payload() -> Str [
+    ffi_i3_payload()
+    end text_read(4, 0)
+]
+
+fun i3_reply(json: Str) -> Bool [
+    ffi_buf_clear(0)
+    text_push(0, json)
+    end ffi_i3_reply() == 1
+]
+
+fun i3_publish(event: Int, json: Str) -> Int [
+    if ffi_i3_clients() == 0 [
+        end 0
+    ]
+    ffi_buf_clear(0)
+    text_push(0, json)
+    end ffi_i3_publish(event)
+]
+
+fun i3_close() [
+    ffi_i3_shutdown()
+    end
+]
+
+!! Napis w cudzyslowach z ucieczkami JSON.
+fun i3_json(s: Str) -> Str [
+    let out = "\""
+    let i = 0
+    let n = str_len(s)
+    while i < n [
+        let c = str_at(s, i)
+        if c == "\"" [
+            out = out + "\\\""
+        ] elif c == "\\" [
+            out = out + "\\\\"
+        ] elif c == "\n" [
+            out = out + "\\n"
+        ] elif c == "\t" [
+            out = out + "\\t"
+        ] elif c != "\r" [
+            out = out + c
+        ]
+        i = i + 1
+    ]
+    end out + "\""
+]
+
+fun i3_bool(b: Bool) -> Str [
+    if b [
+        end "true"
+    ]
+    end "false"
+]
+
+fun i3_rect(x: Int, y: Int, w: Int, h: Int) -> Str [
+    end "{\"x\":" + (x as Str) + ",\"y\":" + (y as Str) + ",\"width\":" + (w as Str) + ",\"height\":" + (h as Str) + "}"
+]
+
+fun i3_first_output_name() -> Str [
+    let outs = output_list()
+    if outs.len() == 0 [
+        end "unknown"
+    ]
+    end output_name(outs[0])
+]
+
+fun i3_ws_json(w: Wm, n: Int) -> Str [
+    let outs = output_list()
+    let x = 0
+    let y = 0
+    let ow = 0
+    let oh = 0
+    if outs.len() > 0 [
+        x = output_x(outs[0])
+        y = output_y(outs[0])
+        ow = output_width(outs[0])
+        oh = output_height(outs[0])
+    ]
+    end "{\"id\":" + ((n + 1) as Str) + ",\"num\":" + ((n + 1) as Str) + ",\"name\":" + i3_json(wmx_ws_name(n)) + ",\"visible\":" + i3_bool(n == w.current) + ",\"focused\":" + i3_bool(n == w.current) + ",\"urgent\":" + i3_bool(bar_has_urgent(w, n)) + ",\"rect\":" + i3_rect(x, y, ow, oh) + ",\"output\":" + i3_json(i3_first_output_name()) + "}"
+]
+
+fun i3_workspaces_json(w: Wm) -> Str [
+    let out = "["
+    let n = 0
+    while n < WM_WORKSPACES [
+        if n > 0 [
+            out = out + ","
+        ]
+        out = out + i3_ws_json(w, n)
+        n = n + 1
+    ]
+    end out + "]"
+]
+
+fun i3_outputs_json(w: Wm) -> Str [
+    let outs = output_list()
+    let out = "["
+    let k = 0
+    while k < outs.len() [
+        let o = outs[k]
+        if k > 0 [
+            out = out + ","
+        ]
+        out = out + "{\"name\":" + i3_json(output_name(o)) + ",\"active\":true,\"primary\":" + i3_bool(k == 0) + ",\"current_workspace\":" + i3_json(wmx_ws_name(w.current)) + ",\"rect\":" + i3_rect(output_x(o), output_y(o), output_width(o), output_height(o)) + "}"
+        k = k + 1
+    ]
+    end out + "]"
+]
+
+fun i3_window_json(w: Wm, h: Int) -> Str [
+    let title = toplevel_title(h)
+    let app = toplevel_app_id(h)
+    let rect = i3_rect(surface_x(h), surface_y(h), toplevel_window_width(h), toplevel_window_height(h))
+    end "{\"id\":" + (h as Str) + ",\"type\":\"con\",\"name\":" + i3_json(title) + ",\"app_id\":" + i3_json(app) + ",\"focused\":" + i3_bool(h == w.focus) + ",\"urgent\":false,\"rect\":" + rect + ",\"nodes\":[],\"floating_nodes\":[]}"
+]
+
+fun i3_tree_json(w: Wm) -> Str [
+    let outs = output_list()
+    let out = "{\"id\":1,\"type\":\"root\",\"name\":\"root\",\"nodes\":["
+    let k = 0
+    while k < outs.len() [
+        let o = outs[k]
+        if k > 0 [
+            out = out + ","
+        ]
+        out = out + "{\"id\":" + ((1000 + k) as Str) + ",\"type\":\"output\",\"name\":" + i3_json(output_name(o)) + ",\"rect\":" + i3_rect(output_x(o), output_y(o), output_width(o), output_height(o)) + ",\"nodes\":["
+        if k == 0 [
+            let n = 0
+            let first = true
+            while n < WM_WORKSPACES [
+                let wins = ""
+                let i = 0
+                let cnt = 0
+                while i < w.handles.len() [
+                    if w.ws[i] == n [
+                        if cnt > 0 [
+                            wins = wins + ","
+                        ]
+                        wins = wins + i3_window_json(w, w.handles[i])
+                        cnt = cnt + 1
+                    ]
+                    i = i + 1
+                ]
+                if cnt > 0 or n == w.current [
+                    if not first [
+                        out = out + ","
+                    ]
+                    first = false
+                    out = out + "{\"id\":" + ((2000 + n) as Str) + ",\"type\":\"workspace\",\"num\":" + ((n + 1) as Str) + ",\"name\":" + i3_json(wmx_ws_name(n)) + ",\"focused\":" + i3_bool(n == w.current) + ",\"layout\":" + i3_json(layout_name(w.wlayout[n])) + ",\"nodes\":[" + wins + "],\"floating_nodes\":[]}"
+                ]
+                n = n + 1
+            ]
+        ]
+        out = out + "]}"
+        k = k + 1
+    ]
+    end out + "]}"
+]
+
+!! Jedno polecenie sway/i3 -> polecenie volcan (`wm_command` albo polecenia fasady); pusty napis, gdy nieobslugiwane.
+fun i3_translate(cmd0: Str) -> Str [
+    let cmd = str_trim(cmd0)
+    let words = str_words(cmd)
+    if words.len() == 0 [
+        end ""
+    ]
+    let head = words[0].clone()
+    if head == "exec" [
+        let rest = str_words_from(cmd, 1)
+        if str_starts_with(rest, "--no-startup-id") [
+            rest = str_words_from(rest, 1)
+        ]
+        end "spawn " + rest
+    ]
+    if head == "workspace" [
+        let arg = str_words_from(cmd, 1)
+        if str_starts_with(arg, "number ") [
+            arg = str_words_from(arg, 1)
+        ]
+        if arg == "next" or arg == "next_on_output" [
+            end "workspace next"
+        ]
+        if arg == "prev" or arg == "prev_on_output" [
+            end "workspace prev"
+        ]
+        end "workspace " + arg
+    ]
+    if head == "move" and words.len() >= 4 and words[1] == "container" and words[2] == "to" and words[3] == "workspace" [
+        let arg = str_words_from(cmd, 4)
+        if str_starts_with(arg, "number ") [
+            arg = str_words_from(arg, 1)
+        ]
+        end "send " + arg
+    ]
+    if head == "kill" [
+        end "close"
+    ]
+    if head == "focus" and words.len() > 1 [
+        let d = words[1].clone()
+        if d == "left" or d == "up" or d == "prev" [
+            end "focus prev"
+        ]
+        if d == "right" or d == "down" or d == "next" [
+            end "focus next"
+        ]
+        end ""
+    ]
+    if head == "floating" [
+        end "float"
+    ]
+    if head == "sticky" [
+        end "sticky"
+    ]
+    if head == "layout" and words.len() > 1 [
+        let l = words[1].clone()
+        if l == "tabbed" [
+            end "layout tabbed"
+        ]
+        if l == "stacking" [
+            end "layout stacked"
+        ]
+        if l == "splith" [
+            end "layout columns"
+        ]
+        if l == "splitv" [
+            end "layout master"
+        ]
+        if l == "toggle" [
+            end "layout next"
+        ]
+        end ""
+    ]
+    if head == "fullscreen" [
+        end "key fullscreen"
+    ]
+    if head == "gaps" and words.len() >= 4 [
+        end "gap " + words[3]
+    ]
+    if head == "reload" [
+        end "reload"
+    ]
+    if head == "exit" [
+        end "quit"
+    ]
+    if head == "scratchpad" and words.len() > 1 and words[1] == "show" [
+        end "scratchpad"
+    ]
+    if head == "move" and words.len() > 1 and words[1] == "scratchpad" [
+        end "scratch send"
+    ]
+    end ""
+]
+
+!! Dzieli napis polecen sway na pojedyncze (separator `;`; przecinek lacznik kryteriow nie jest obslugiwany).
+fun i3_split_commands(payload: Str) -> List<Str> [
+    end str_split(payload, ";")
+]
+
+fun i3_workspace_event(w: Wm, old: Int, cur: Int) -> Str [
+    end "{\"change\":\"focus\",\"current\":" + i3_ws_json(w, cur) + ",\"old\":" + i3_ws_json(w, old) + "}"
+]
+
+fun i3_window_event(w: Wm, change: Str, h: Int) -> Str [
+    end "{\"change\":" + i3_json(change) + ",\"container\":" + i3_window_json(w, h) + "}"
+]
