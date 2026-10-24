@@ -1,0 +1,32 @@
+include <ffi>
+include <ffi_ext>
+include <caps>
+
+!! Udostepnianie ekranu: protokol ext-image-copy-capture-v1 (przegladarki przez portal, OBS, nowe narzedzia z obsluga ext). Zrodlami sa wyjscia (ext-output-image-capture-source, tworzy je Louvre); kopiowanie klatek robi
+!! blok SCREENCOPY w shimie (testowany na prawdziwym libwayland: tests/standalone/screencopy_run.sh).
+!! Dla starszych narzedzi jest tez wlr-screencopy v3 (grim, wf-recorder, xdg-desktop-portal-wlr). Bez przechwytywania
+!! kursora i toplevelow (sesja kursora konczy sie od razu) i bez dmabuf.
+!! Format bufora: ARGB8888 / XRGB8888 (wl_shm). Klatki po pierwszej czekaja na odmalowanie wyjscia.
+
+!! Wlacza globala po starcie kompozytora. Zwraca true, gdy klienci moga juz tworzyc sesje.
+fun screencopy_enable() -> Bool [
+    if not caps_has(CAP_SCREENCOPY) [
+        end false
+    ]
+    end ffi_screencopy_enable(1) == 1
+]
+
+fun screencopy_disable() [
+    ffi_screencopy_enable(0)
+    end
+]
+
+!! Liczba zywych sesji przechwytu.
+fun screencopy_sessions() -> Int [
+    end ffi_screencopy_sessions()
+]
+
+!! Liczba klatek oddanych klientom od startu.
+fun screencopy_frames() -> Int [
+    end ffi_screencopy_frames()
+]
