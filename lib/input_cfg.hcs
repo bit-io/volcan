@@ -1,0 +1,146 @@
+include <config>
+include <keys>
+include <strings>
+include <caps>
+
+!! Konfiguracja wejscia z sekcji [input] pliku konfiguracyjnego.
+!!
+!!   [input]
+!!   kb_layout = pl              !! uklad XKB (np. pl, us, de)
+!!   kb_variant =                !! wariant (puste = domyslny)
+!!   kb_options = ctrl:nocaps    !! opcje XKB, rozdzielone przecinkami
+!!   repeat_rate = 30            !! znakow na sekunde (0 wylacza autopowtarzanie)
+!!   repeat_delay = 300          !! ms do pierwszego powtorzenia
+!!
+!!   touchpad_tap = on           !! ustawienia wszystkich touchpadow
+!!   touchpad_natural_scroll = on
+!!   touchpad_dwt = on           !! wylacz touchpad podczas pisania
+!!   pointer_accel_profile = flat   !! ustawienia wszystkich myszy
+!!   pointer_accel_speed = -0.2
+!!   device.1 = SYNA* kind=touchpad tap=off     !! reguly dla urzadzen o nazwie pasujacej do wzorca
+!!
+!! Klucze libinput: tap, tap_drag, tap_lock, natural_scroll, dwt, middle_emulation, left_handed (on/off),
+!! accel_profile (flat/adaptive), accel_speed (-1..1), scroll_method (none/two_finger/edge/button),
+!! click_method (none/button_areas/clickfinger). Kolejnosc: najpierw touchpad_*/pointer_*, potem device.N
+!! (pozniejsze nadpisuja wczesniejsze). Ustawienia sa stosowane tez do urzadzen podlaczonych pozniej
+!! (zdarzenie EV_INPUT_DEVICE_PLUGGED). Nazwy urzadzen pokazuje input_devices().
+!! Dziala przez uchwyt libinput w CZInputDevice (cz-core); w backendzie Wayland (kompozytor w oknie)
+!! urzadzenia nie maja uchwytu libinput i ustawienia sa pomijane.
+
+!! Klucze libinput rozpoznawane w [input] (stala jako funkcja: const moze byc tylko literalem skalarnym).
+fun input_li_keys() -> List<Str> [
+    end ["tap", "tap_drag", "tap_lock", "natural_scroll", "dwt", "middle_emulation", "left_handed", "accel_profile", "accel_speed", "scroll_method", "click_method"]
+]
+
+struct InputReport [
+    applied: Int,
+    errors: List<Str>
+]
+
+!! Reguly libinput zbudowane z konfiguracji (kazda: `RODZAJ WZORZEC klucz=wartosc ...`).
+fun input_li_specs() -> List<Str> [
+    let out: List<Str> = []
+    let kinds = ["touchpad", "pointer"]
+    let ki = 0
+    while ki < kinds.len() [
+        let kind = kinds[ki].clone()
+        let spec = kind + " *"
+        let any_key = false
+        let names = input_li_keys()
+        let i = 0
+        while i < names.len() [
+            let name = names[i].clone()
+            let key = "input." + kind + "_" + name
+            if config_has(key) [
+                spec = spec + " " + name + "=" + str_trim(config_get(key, ""))
+                any_key = true
+            ]
+            i = i + 1
+        ]
+        if any_key [
+            out.push(spec)
+        ]
+        ki = ki + 1
+    ]
+    let n = 1
+    while n <= 32 [
+        let line = config_get("input.device." + (n as Str), "")
+        if str_len(line) > 0 [
+            let words = str_words(line)
+            if words.len() > 0 [
+                let kind = "any"
+                let rest = ""
+                let j = 1
+                while j < words.len() [
+                    let w = words[j].clone()
+                    if str_starts_with(w, "kind=") [
+                        kind = str_sub(w, 5, str_len(w))
+                    ] else [
+                        rest = rest + " " + w
+                    ]
+                    j = j + 1
+                ]
+                out.push(kind + " " + words[0].clone() + rest)
+            ]
+        ]
+        n = n + 1
+    ]
+    end out
+]
+
+!! Wgrywa reguly libinput do shima (zastepuje poprzednie); zwraca opisy odrzuconych regul.
+fun input_li_load() -> List<Str> [
+    let errors: List<Str> = []
+    ffi_li_clear()
+    let specs = input_li_specs()
+    let i = 0
+    while i < specs.len() [
+        ffi_buf_clear(0)
+        text_push(0, specs[i].clone())
+        if ffi_li_add_rule() != 1 [
+            ffi_li_error()
+            errors.push(specs[i].clone() + ": " + text_read(4, 0))
+        ]
+        i = i + 1
+    ]
+    end errors
+]
+
+!! Stosuje [input]: uklad klawiatury, powtarzanie i reguly libinput. Zwraca liczbe zastosowanych grup
+!! ustawien razem z bledami regul (np. literowka w wartosci).
+fun input_apply_checked() -> InputReport [
+    let applied = 0
+    if config_has("input.kb_layout") or config_has("input.kb_variant") or config_has("input.kb_options") [
+        if keyboard_set_keymap(config_get("input.kb_layout", ""), config_get("input.kb_variant", ""), config_get("input.kb_options", "")) [
+            applied = applied + 1
+        ]
+    ]
+    if config_has("input.repeat_rate") or config_has("input.repeat_delay") [
+        let rate = config_int("input.repeat_rate", keyboard_repeat_rate())
+        let delay = config_int("input.repeat_delay", keyboard_repeat_delay())
+        if rate < 0 [
+            rate = 0
+        ]
+        if delay < 0 [
+            delay = 0
+        ]
+        keyboard_set_repeat(rate, delay)
+        applied = applied + 1
+    ]
+    let errors = input_li_load()
+    if ffi_li_rule_count() > 0 [
+        applied = applied + ffi_li_apply()
+    ]
+    end InputReport(applied, errors)
+]
+
+!! Jak input_apply_checked, ale tylko liczba zastosowanych ustawien.
+fun input_apply() -> Int [
+    end input_apply_checked().applied
+]
+
+!! Podlaczone urzadzenia wejsciowe: `nazwa<TAB>rodzaj<TAB>libinput|inne`, jedna linia na urzadzenie.
+fun input_devices() -> Str [
+    ffi_li_devices()
+    end text_read(4, 0)
+]
