@@ -1,0 +1,241 @@
+using <0.5>
+
+!! Testy modulow bez zaleznosci od Louvre w czasie dzialania: layout, strings, glob, gesty.
+!! Oczekiwane prostokaty nowych ukladow pochodza z scripts/layout_model.py --expected
+!! (referencyjny model Pythona, sprawdzony na 12000 losowych przypadkow).
+!! Wynik: linie `FAIL ...` dla bledow i na koncu `TESTS OK` albo `TESTS FAILED n`.
+get <bit:volcan>
+
+fun fail(name: Str) -> Int [
+    log("FAIL", name)
+    end 1
+]
+
+fun check_int(name: Str, got: Int, want: Int) -> Int [
+    if got != want [
+        log("FAIL", name, "got", got, "want", want)
+        end 1
+    ]
+    end 0
+]
+
+fun check_bool(name: Str, got: Bool, want: Bool) -> Int [
+    if got != want [
+        end fail(name)
+    ]
+    end 0
+]
+
+fun check_str(name: Str, got: Str, want: Str) -> Int [
+    if got != want [
+        log("FAIL", name, "got", got, "want", want)
+        end 1
+    ]
+    end 0
+]
+
+fun check_rect(name: Str, rs: List<Rect>, i: Int, x: Int, y: Int, w: Int, h: Int) -> Int [
+    let r = rs[i].clone()
+    let bad = 0
+    bad = bad + check_int(name + ".x", r.x, x)
+    bad = bad + check_int(name + ".y", r.y, y)
+    bad = bad + check_int(name + ".w", r.w, w)
+    bad = bad + check_int(name + ".h", r.h, h)
+    end bad
+]
+
+fun area() -> Rect [
+    end Rect(0, 0, 1000, 600)
+]
+
+fun test_dwindle() -> Int [
+    let bad = 0
+    bad = bad + check_int("dwindle.0", layout_compute(LAYOUT_DWINDLE, 0, area(), 10, 550).len(), 0)
+    let r1 = layout_compute(LAYOUT_DWINDLE, 1, area(), 10, 550)
+    bad = bad + check_rect("dwindle1", r1, 0, 0, 0, 1000, 600)
+    let r3 = layout_compute(LAYOUT_DWINDLE, 3, area(), 10, 550)
+    bad = bad + check_int("dwindle3.len", r3.len(), 3)
+    bad = bad + check_rect("dwindle3.0", r3, 0, 0, 0, 544, 600)
+    bad = bad + check_rect("dwindle3.1", r3, 1, 554, 0, 446, 295)
+    bad = bad + check_rect("dwindle3.2", r3, 2, 554, 305, 446, 295)
+    let r5 = layout_compute(LAYOUT_DWINDLE, 5, area(), 10, 550)
+    bad = bad + check_rect("dwindle5.3", r5, 3, 782, 305, 218, 142)
+    bad = bad + check_rect("dwindle5.4", r5, 4, 782, 457, 218, 143)
+    end bad
+]
+
+fun test_centered() -> Int [
+    let bad = 0
+    let r2 = layout_compute(LAYOUT_CENTERED, 2, area(), 10, 500)
+    bad = bad + check_rect("centered2.0", r2, 0, 0, 0, 495, 600)
+    bad = bad + check_rect("centered2.1", r2, 1, 505, 0, 495, 600)
+    let r3 = layout_compute(LAYOUT_CENTERED, 3, area(), 10, 500)
+    bad = bad + check_rect("centered3.0", r3, 0, 255, 0, 490, 600)
+    bad = bad + check_rect("centered3.1", r3, 1, 755, 0, 245, 600)
+    bad = bad + check_rect("centered3.2", r3, 2, 0, 0, 245, 600)
+    let r5 = layout_compute(LAYOUT_CENTERED, 5, area(), 10, 500)
+    bad = bad + check_rect("centered5.1", r5, 1, 755, 0, 245, 295)
+    bad = bad + check_rect("centered5.2", r5, 2, 0, 0, 245, 295)
+    bad = bad + check_rect("centered5.3", r5, 3, 755, 305, 245, 295)
+    bad = bad + check_rect("centered5.4", r5, 4, 0, 305, 245, 295)
+    end bad
+]
+
+fun test_scroll() -> Int [
+    let bad = 0
+    let a = layout_compute_focus(LAYOUT_SCROLL, 2, area(), 10, 600, 0)
+    bad = bad + check_rect("scroll2.1", a, 1, 610, 0, 600, 600)
+    let b = layout_compute_focus(LAYOUT_SCROLL, 4, area(), 10, 600, 2)
+    bad = bad + check_rect("scroll4f2.0", b, 0, -1020, 0, 600, 600)
+    bad = bad + check_rect("scroll4f2.2", b, 2, 200, 0, 600, 600)
+    let c = layout_compute_focus(LAYOUT_SCROLL, 4, area(), 10, 600, 3)
+    bad = bad + check_rect("scroll4f3.3", c, 3, 400, 0, 600, 600)
+    let d = layout_compute_focus(LAYOUT_SCROLL, 4, area(), 10, 600, 99)
+    bad = bad + check_rect("scroll4f99.3", d, 3, 400, 0, 600, 600)
+    end bad
+]
+
+fun test_layout_names() -> Int [
+    let bad = 0
+    let k = 0
+    while k < LAYOUT_COUNT [
+        bad = bad + check_int("layout_name roundtrip " + (k as Str), layout_from_name(layout_name(k)), k)
+        k = k + 1
+    ]
+    bad = bad + check_int("layout_from_name nieznany", layout_from_name("xyz"), -1)
+    bad = bad + check_int("layout_compute len", layout_compute(LAYOUT_GRID, 5, area(), 10, 550).len(), 5)
+    end bad
+]
+
+fun test_strings() -> Int [
+    let bad = 0
+    bad = bad + check_str("str_sub", str_sub("abcdef", 1, 4), "bcd")
+    bad = bad + check_str("str_trim", str_trim("  hej  "), "hej")
+    bad = bad + check_int("str_find", str_find("a=b", "=", 0), 1)
+    bad = bad + check_int("str_find brak", str_find("abc", "x", 0), -1)
+    bad = bad + check_bool("str_starts_with", str_starts_with("volcan", "vol"), true)
+    bad = bad + check_int("str_split len", str_split("a,b,,c", ",").len(), 4)
+    bad = bad + check_int("str_words len", str_words("  a   b\tc ").len(), 3)
+    bad = bad + check_str("str_words_from", str_words_from("spawn foot -e zsh", 1), "foot -e zsh")
+    bad = bad + check_int("str_int", str_int("-42", 0), -42)
+    bad = bad + check_int("str_int fallback", str_int("x", 7), 7)
+    bad = bad + check_bool("glob *", glob_match("org.gnome.*", "org.gnome.Calculator"), true)
+    bad = bad + check_bool("glob ?", glob_match("a?c", "abc"), true)
+    bad = bad + check_bool("glob miss", glob_match("a?c", "abbc"), false)
+    end bad
+]
+
+fun test_outputs_cfg() -> Int [
+    let bad = 0
+    let m = outcfg_parse_mode("2560x1440@144")
+    bad = bad + check_int("mode.len", m.len(), 3)
+    bad = bad + check_int("mode.w", m[0], 2560)
+    bad = bad + check_int("mode.h", m[1], 1440)
+    bad = bad + check_int("mode.hz", m[2], 144000)
+    bad = bad + check_int("mode bez hz", outcfg_parse_mode("1920x1080")[2], 0)
+    bad = bad + check_int("mode zly", outcfg_parse_mode("abc").len(), 0)
+    bad = bad + check_str("kv", outcfg_kv("DP-1 mode=1920x1080 scale=1.5", "scale"), "1.5")
+    bad = bad + check_str("kv brak", outcfg_kv("DP-1 scale=1.5", "mode"), "")
+    bad = bad + check_bool("float 1.25", outcfg_float("1.25", 0.0) == 1.25, true)
+    bad = bad + check_bool("float 2", outcfg_float("2", 0.0) == 2.0, true)
+    bad = bad + check_bool("float zly", outcfg_float("x.y", 9.0) == 9.0, true)
+    bad = bad + check_int("transform 90", outcfg_transform("90"), 1)
+    bad = bad + check_int("transform zly", outcfg_transform("45"), -1)
+    bad = bad + check_int("on", outcfg_on("on"), 1)
+    bad = bad + check_int("off", outcfg_on("off"), 0)
+    bad = bad + check_int("on zly", outcfg_on("moze"), -1)
+    end bad
+]
+
+fun test_gestures() -> Int [
+    let bad = 0
+    let g = gesture_new()
+    g = gesture_feed(g, Event(EV_SWIPE_BEGIN, 0, 0, 0.0, 0.0, 0))
+    g = gesture_feed(g, Event(EV_SWIPE_UPDATE, 0, 0, -80.0, 5.0, 0))
+    g = gesture_feed(g, Event(EV_SWIPE_UPDATE, 0, 0, -70.0, -2.0, 0))
+    let end_ev = Event(EV_SWIPE_END, 0, 0, 0.0, 0.0, 0)
+    bad = bad + check_str("swipe left", gesture_direction(g, end_ev, 120), "left")
+    bad = bad + check_str("swipe za krotki", gesture_direction(g, end_ev, 200), "")
+    bad = bad + check_str("swipe anulowany", gesture_direction(g, Event(EV_SWIPE_END, 1, 0, 0.0, 0.0, 0), 120), "")
+    let g2 = gesture_feed(gesture_new(), Event(EV_SWIPE_BEGIN, 0, 0, 0.0, 0.0, 0))
+    g2 = gesture_feed(g2, Event(EV_SWIPE_UPDATE, 0, 0, 10.0, 150.0, 0))
+    bad = bad + check_str("swipe down", gesture_direction(g2, end_ev, 120), "down")
+    end bad
+]
+
+
+fun test_mru_and_swap() -> Int [
+    let bad = 0
+    let m: List<Int> = [1, 2, 3]
+    let t = mru_touch(m, 3)
+    bad = bad + check_int("mru_touch.0", t[0], 3)
+    bad = bad + check_int("mru_touch.len", t.len(), 3)
+    bad = bad + check_int("mru_touch nowy", mru_touch(m, 9).len(), 4)
+    bad = bad + check_int("mru_touch zero", mru_touch(m, 0).len(), 3)
+    bad = bad + check_int("mru_remove", mru_remove(m, 2).len(), 2)
+    let a: List<Int> = [10, 20, 30, 40]
+    let b = wmx_lswap(a, 1, 3)
+    bad = bad + check_int("lswap.1", b[1], 40)
+    bad = bad + check_int("lswap.3", b[3], 20)
+    bad = bad + check_int("lswap.0", b[0], 10)
+    bad = bad + check_int("lswap.len", b.len(), 4)
+    end bad
+]
+
+fun test_app_and_names() -> Int [
+    let bad = 0
+    bad = bad + check_str("app_replace", app_replace("spawn {terminal} -e {terminal}", "{terminal}", "foot"), "spawn foot -e foot")
+    bad = bad + check_str("app_replace brak", app_replace("abc", "{x}", "y"), "abc")
+    let a = app_bind(app_rule(app_layout(app_new("t"), "dwindle"), "app_id=x => float"), "Super+b : spawn firefox")
+    bad = bad + check_str("app.layout", a.layout, "dwindle")
+    bad = bad + check_int("app.binds", a.binds.len(), 1)
+    bad = bad + check_int("app.rules", a.rules.len(), 1)
+    bad = bad + check_int("app oryginal nietkniety", app_new("t").binds.len(), 0)
+    config_set("workspace.2", "code")
+    bad = bad + check_int("ws_index nazwa", wmx_ws_index("code"), 1)
+    bad = bad + check_int("ws_index liczba", wmx_ws_index("5"), 4)
+    bad = bad + check_int("ws_index brak", wmx_ws_index("nie-ma"), -1)
+    bad = bad + check_str("ws_name", wmx_ws_name(1), "code")
+    bad = bad + check_str("ws_name domyslna", wmx_ws_name(2), "3")
+    config_default("test.klucz", "a")
+    config_default("test.klucz", "b")
+    bad = bad + check_str("config_default", config_get("test.klucz", ""), "a")
+    config_append("test.seria", "x")
+    config_append("test.seria", "y")
+    bad = bad + check_str("config_append.2", config_get("test.seria.2", ""), "y")
+    end bad
+]
+
+fun test_input_specs() -> Int [
+    let bad = 0
+    config_set("input.touchpad_tap", "on")
+    config_set("input.touchpad_accel_speed", "0.3")
+    config_set("input.pointer_accel_profile", "flat")
+    config_set("input.device.1", "SYNA* kind=touchpad tap=off")
+    let specs = input_li_specs()
+    bad = bad + check_int("li_specs.len", specs.len(), 3)
+    bad = bad + check_str("li_specs.0", specs[0].clone(), "touchpad * tap=on accel_speed=0.3")
+    bad = bad + check_str("li_specs.1", specs[1].clone(), "pointer * accel_profile=flat")
+    bad = bad + check_str("li_specs.2", specs[2].clone(), "touchpad SYNA* tap=off")
+    end bad
+]
+
+fun main() [
+    let bad = 0
+    bad = bad + test_dwindle()
+    bad = bad + test_centered()
+    bad = bad + test_scroll()
+    bad = bad + test_layout_names()
+    bad = bad + test_strings()
+    bad = bad + test_outputs_cfg()
+    bad = bad + test_gestures()
+    bad = bad + test_mru_and_swap()
+    bad = bad + test_app_and_names()
+    bad = bad + test_input_specs()
+    if bad == 0 [
+        log("TESTS OK")
+    ] else [
+        log("TESTS FAILED", bad)
+    ]
+    end
+]
