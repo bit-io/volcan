@@ -1,0 +1,115 @@
+include <ffi_ext>
+include <checked>
+
+!! Zdolnosci kompozytora: co jest zbudowane w shimie (maska bitow z vcn_features) i co Louvre 3.0
+!! obsluguje samo albo wcale. Pozwala skryptowi sprawdzic funkcje zamiast zakladac, ze dziala.
+
+const CAP_POPUPS: Int = 1
+const CAP_LAYER_SHELL: Int = 2
+const CAP_TOUCH: Int = 4
+const CAP_GESTURES: Int = 8
+const CAP_CLIPBOARD: Int = 16
+const CAP_DND: Int = 32
+const CAP_SESSION_LOCK: Int = 64
+const CAP_CUSTOM_DRAW: Int = 128
+const CAP_GAMMA: Int = 256
+const CAP_IPC: Int = 512
+const CAP_CONFIG: Int = 1024
+const CAP_XKB: Int = 2048
+const CAP_IPC_SUBSCRIBE: Int = 4096
+const CAP_POINTER_CONSTRAINTS: Int = 8192
+const CAP_CONFIG_WATCH: Int = 16384
+const CAP_LIBINPUT: Int = 32768
+const CAP_SCREENCOPY: Int = 65536
+
+!! Czy shim ma funkcje oznaczona bitem `cap` (CAP_*).
+fun caps_has(cap: Int) -> Bool [
+    end (ffi_features() / cap) % 2 == 1
+]
+
+fun caps_name(cap: Int) -> Str [
+    if cap == CAP_POPUPS [
+        end "popups"
+    ]
+    if cap == CAP_LAYER_SHELL [
+        end "layer-shell"
+    ]
+    if cap == CAP_TOUCH [
+        end "touch"
+    ]
+    if cap == CAP_GESTURES [
+        end "gestures"
+    ]
+    if cap == CAP_CLIPBOARD [
+        end "clipboard"
+    ]
+    if cap == CAP_DND [
+        end "dnd"
+    ]
+    if cap == CAP_SESSION_LOCK [
+        end "session-lock"
+    ]
+    if cap == CAP_CUSTOM_DRAW [
+        end "custom-draw"
+    ]
+    if cap == CAP_GAMMA [
+        end "gamma"
+    ]
+    if cap == CAP_IPC [
+        end "ipc"
+    ]
+    if cap == CAP_CONFIG [
+        end "config"
+    ]
+    if cap == CAP_XKB [
+        end "xkb"
+    ]
+    if cap == CAP_IPC_SUBSCRIBE [
+        end "ipc-subscribe"
+    ]
+    if cap == CAP_POINTER_CONSTRAINTS [
+        end "pointer-constraints"
+    ]
+    if cap == CAP_CONFIG_WATCH [
+        end "config-watch"
+    ]
+    if cap == CAP_LIBINPUT [
+        end "libinput-config"
+    ]
+    if cap == CAP_SCREENCOPY [
+        end "screencopy"
+    ]
+    end "unknown"
+]
+
+!! Lista nazw wszystkich wlaczonych zdolnosci (do logu startowego i `volcanctl caps`).
+fun caps_list() -> List<Str> [
+    let out: List<Str> = []
+    let c = 1
+    while c <= CAP_SCREENCOPY [
+        if caps_has(c) [
+            out.push(caps_name(c))
+        ]
+        c = c * 2
+    ]
+    end out
+]
+
+!! Funkcje, ktorych volcan NIE ma, bo Louvre 3.0 ich nie udostepnia kompozytorowi (patrz docs/PROTOCOLS.md).
+!! Zwracaja ST_UNSUPPORTED z opisem, zeby skrypt mogl to obsluzyc, zamiast dostac cichy brak dzialania.
+!! Nazwy: screencopy (tylko gdy shim nie ma CAP_SCREENCOPY), input-method, text-input, tablet, vrr.
+fun caps_unsupported(feature: Str) -> Status [
+    if feature == "screencopy" and not caps_has(CAP_SCREENCOPY) [
+        end status_error(ST_UNSUPPORTED, "screencopy wymaga shima z blokiem SCREENCOPY (ext-image-copy-capture-v1)")
+    ]
+    if feature == "input-method" or feature == "text-input" [
+        end status_error(ST_UNSUPPORTED, "Louvre 3.0 nie ma protokolow input-method/text-input (IME)")
+    ]
+    if feature == "tablet" [
+        end status_error(ST_UNSUPPORTED, "Louvre 3.0 ma tylko definicje protokolu tablet-v2, bez API dla kompozytora")
+    ]
+    if feature == "vrr" [
+        end status_error(ST_UNSUPPORTED, "Louvre 3.0 nie udostepnia adaptive sync (VRR)")
+    ]
+    end status_ok()
+]
