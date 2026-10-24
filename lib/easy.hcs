@@ -1,0 +1,58 @@
+include <app>
+
+!! Najkrotsza droga do kompozytora (inspiracja: Canonical MirAL, `MirRunner::run_with`).
+!!
+!!   get <bit:volcan>
+!!   fun main() [ volcan_main("moj-wm") ]            !! gotowy kompozytor kafelkowy, 1 linia
+!!
+!! Gotowe opisy (App) mozna dalej doprawiac funkcjami app_*:
+!!
+!!   volcan_run(app_gap(easy_tiling("wm"), 12))
+!!   volcan_run(app_rule(easy_floating("wm"), "app_id=foot => tile"))
+!!
+!! Kazdy opis ma te same zalozenia: plik ~/.config/volcan/NAZWA.conf (przeladowanie w locie), IPC (volcanctl),
+!! udostepnianie ekranu, XWayland przez xwayland-satellite, autostart terminala. Plik konfiguracyjny zawsze wygrywa.
+
+!! Terminal: $TERMINAL, a gdy pusty - foot.
+fun easy_terminal() -> Str [
+    end app_env("TERMINAL", "foot")
+]
+
+!! Kafelkowy: standardowe skroty, przestrzenie 1..9, pasek stanu, animacje 120/160 ms.
+fun easy_tiling(name: Str) -> App [
+    let a = app_standard(app_new(name), easy_terminal())
+    a = app_bar(a, true)
+    a = app_layout(a, "master")
+    a = app_set(a, "bar.widgets", "clock:%a %d %b %H:%M")
+    a = app_set(a, "bar.refresh_s", "5")
+    end app_animations(a, 120, 160)
+]
+
+!! Zwykly pulpit z oknami plywajacymi (Super + mysz przesuwa i zmienia rozmiar), bez paska.
+fun easy_floating(name: Str) -> App [
+    let a = app_standard(app_new(name), easy_terminal())
+    a = app_rule(a, "app_id=* => float")
+    end app_animations(a, 0, 140)
+]
+
+!! Kiosk: jeden program na caly ekran, bez skrotow zarzadzania, restartowany przez autostart przy starcie.
+fun easy_kiosk(name: Str, command: Str) -> App [
+    let a = app_new(name)
+    a = app_autostart(a, command)
+    a = app_rule(a, "app_id=* => fullscreen")
+    a = app_layout(a, "monocle")
+    end app_bar(a, false)
+]
+
+!! Uruchamia gotowy kompozytor kafelkowy. Zwraca kod wyjscia (0 albo 1 przy bledzie startu).
+fun volcan_main(name: Str) -> Int [
+    end volcan_run(easy_tiling(name))
+]
+
+fun volcan_main_floating(name: Str) -> Int [
+    end volcan_run(easy_floating(name))
+]
+
+fun volcan_main_kiosk(name: Str, command: Str) -> Int [
+    end volcan_run(easy_kiosk(name, command))
+]
