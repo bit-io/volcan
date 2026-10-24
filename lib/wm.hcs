@@ -10,6 +10,7 @@ include <keys>
 include <session>
 include <style>
 include <input>
+include <startup>
 
 !! Zarzadca okien: przestrzenie robocze (globalne albo osobne na kazde wyjscie), okna kafelkowe /
 !! plywajace / zmaksymalizowane / pelnoekranowe / przyklejone, scratchpad, uklady (master-stack,
@@ -525,18 +526,34 @@ fun wm_place(h: Int, x: Int, y: Int, width: Int, height: Int) [
         ht = maxh
     ]
     toplevel_resize(h, wd, ht)
-    surface_move(h, x - toplevel_window_x(h), y - toplevel_window_y(h))
+    let tx = x - toplevel_window_x(h)
+    let ty = y - toplevel_window_y(h)
+    !! Animacja przesuniecia (anim.move_ms > 0): tylko okna, ktore juz gdzies stoja. Nowe okno (pozycja 0,0)
+    !! trafia na miejsce od razu - wejscie ma osobna animacje anim.open_ms (anim_open).
+    let ms = config_int("anim.move_ms", 0)
+    let cx = surface_x(h)
+    let cy = surface_y(h)
+    if ms > 0 and (cx != 0 or cy != 0) and (cx != tx or cy != ty) [
+        anim_move(h, tx, ty, ms, config_int("anim.ease", EASE_OUT))
+    ] else [
+        surface_move(h, tx, ty)
+    ]
     end
 ]
 
-!! Obszar uzytkowy wyjscia o numerze `index` (po odjeciu pasków layer-shell).
+!! Obszar uzytkowy wyjscia o numerze `index` (po odjeciu pasków layer-shell i, gdy bar.enabled = true,
+!! paska rysowanego przez kompozytor o wysokosci bar.height - patrz bar.hcs).
 fun wm_area(index: Int) -> Rect [
     let outs = output_list()
     if index < 0 or index >= outs.len() [
         end Rect(0, 0, 0, 0)
     ]
     let o = outs[index]
-    end Rect(output_available_x(o), output_available_y(o), output_available_width(o), output_available_height(o))
+    let top = 0
+    if config_bool("bar.enabled", false) [
+        top = config_int("bar.height", 24)
+    ]
+    end Rect(output_available_x(o), output_available_y(o) + top, output_available_width(o), output_available_height(o) - top)
 ]
 
 !! Scratchpad: wysyla okno do ukrytej szuflady (okno plywajace).
@@ -675,7 +692,15 @@ fun wm_arrange(w0: Wm) -> Wm [
         let ws_k = wm_ws_of(w, k)
         let kind = w.wlayout[ws_k]
         let tiled = wm_visible_on(w, k, WMODE_TILED)
-        let rects = layout_compute(kind, tiled.len(), area, w.gap, w.wratio[ws_k])
+        let fidx = 0
+        let fi = 0
+        while fi < tiled.len() [
+            if tiled[fi] == w.focus [
+                fidx = fi
+            ]
+            fi = fi + 1
+        ]
+        let rects = layout_compute_focus(kind, tiled.len(), area, w.gap, w.wratio[ws_k], fidx)
         let i = 0
         while i < tiled.len() [
             let r = rects[i].clone()
@@ -722,6 +747,18 @@ fun wm_apply_focus(w: Wm) [
     ]
     if w.focus != 0 [
         toplevel_focus(w.focus)
+    ]
+    !! Okna z regula `ontop` zostaja nad aktywnym oknem (tylko widoczne).
+    let k = 0
+    while k < w.handles.len() [
+        let oh = w.handles[k]
+        if oh != w.focus and w.hid[k] == 0 [
+            let act = rules_match(toplevel_app_id(oh), toplevel_title(oh))
+            if act.ontop == 1 [
+                surface_raise(oh)
+            ]
+        ]
+        k = k + 1
     ]
     end
 ]
@@ -869,6 +906,9 @@ fun wm_handle(w: Wm, ev: Event) -> Wm [
         if surface_role(a) == ROLE_TOPLEVEL [
             r = wm_add(r, a, WMODE_TILED)
             r = wm_classify(r, a)
+            if config_int("anim.open_ms", 0) > 0 [
+                anim_open(a, config_int("anim.open_ms", 0))
+            ]
         ]
     ]
     if kind == EV_TOPLEVEL_APP_ID or kind == EV_TOPLEVEL_TITLE [
@@ -996,7 +1036,7 @@ fun wm_err(w: Wm, msg: Str) -> WmResult [
 ]
 
 !! Wykonuje polecenie tekstowe (np. z IPC lub skrotu). Po poleceniu wywolaj wm_arrange i wm_apply_focus.
-!! Polecenia: workspace N (1..9), send N, layout master|columns|grid|monocle|tabbed|stacked|next, float,
+!! Polecenia: workspace N (1..9)|next|prev, send N, layout master|columns|grid|monocle|tabbed|stacked|dwindle|centered|scroll|next, float,
 !! sticky, focus next|prev|urgent, urgent, promote, ratio N (promile)|up|down, gap N, output next, close,
 !! scratchpad, scratch send, per-output on|off, follow-mouse on|off, spawn PROGRAM..., key NAZWA,
 !! windows, status.
@@ -1011,9 +1051,15 @@ fun wm_command(w: Wm, line: Str, output_count: Int) -> WmResult [
         arg = words[1].clone()
     ]
     if cmd == "workspace" [
+        if arg == "next" [
+            end wm_ok(wm_switch(w, (w.current + 1) % WM_WORKSPACES))
+        ]
+        if arg == "prev" [
+            end wm_ok(wm_switch(w, (w.current + WM_WORKSPACES - 1) % WM_WORKSPACES))
+        ]
         let n = wm_parse_int(arg)
         if n < 1 or n > WM_WORKSPACES [
-            end wm_err(w, "workspace 1..9")
+            end wm_err(w, "workspace 1..9|next|prev")
         ]
         end wm_ok(wm_switch(w, n - 1))
     ]
@@ -1028,25 +1074,11 @@ fun wm_command(w: Wm, line: Str, output_count: Int) -> WmResult [
         if arg == "next" [
             end wm_ok(wm_cycle_layout(w))
         ]
-        if arg == "master" [
-            end wm_ok(wm_set_layout(w, LAYOUT_MASTER_STACK))
+        let kind = layout_from_name(arg)
+        if kind >= 0 [
+            end wm_ok(wm_set_layout(w, kind))
         ]
-        if arg == "columns" [
-            end wm_ok(wm_set_layout(w, LAYOUT_COLUMNS))
-        ]
-        if arg == "grid" [
-            end wm_ok(wm_set_layout(w, LAYOUT_GRID))
-        ]
-        if arg == "monocle" [
-            end wm_ok(wm_set_layout(w, LAYOUT_MONOCLE))
-        ]
-        if arg == "tabbed" [
-            end wm_ok(wm_set_layout(w, LAYOUT_TABBED))
-        ]
-        if arg == "stacked" [
-            end wm_ok(wm_set_layout(w, LAYOUT_STACKED))
-        ]
-        end wm_err(w, "layout master|columns|grid|monocle|tabbed|stacked|next")
+        end wm_err(w, "layout master|columns|grid|monocle|tabbed|stacked|dwindle|centered|scroll|next")
     ]
     if cmd == "float" [
         end wm_ok(wm_toggle_float(w, w.focus))
@@ -1148,12 +1180,15 @@ fun wm_command(w: Wm, line: Str, output_count: Int) -> WmResult [
         keyboard_tap(code)
         end wm_ok(w)
     ]
+    if cmd == "caps" [
+        end WmResult(w.clone(), volcan_caps_line())
+    ]
     if cmd == "windows" [
         end WmResult(w.clone(), wm_list(w))
     ]
     if cmd == "status" [
         let vis = wm_visible(w)
-        let text = "workspace=" + ((w.current + 1) as Str) + " layout=" + (wm_layout(w) as Str) + " windows=" + (vis.len() as Str) + " ratio=" + (wm_ratio(w) as Str) + " gap=" + (w.gap as Str)
+        let text = "workspace=" + ((w.current + 1) as Str) + " layout=" + (wm_layout(w) as Str) + " layout_name=" + layout_name(wm_layout(w)) + " windows=" + (vis.len() as Str) + " ratio=" + (wm_ratio(w) as Str) + " gap=" + (w.gap as Str)
         end WmResult(w.clone(), text)
     ]
     end wm_err(w, "nieznane polecenie")
