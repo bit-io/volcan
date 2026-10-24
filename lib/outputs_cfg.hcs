@@ -1,0 +1,369 @@
+include <output>
+include <config>
+include <strings>
+
+!! Konfiguracja wyjsc (monitorow) z pliku: tryb, polozenie, skala, obrot, vsync, wygaszenie,
+!! ulozenie wzgledem innych wyjsc i profile zalezne od tego, jakie monitory sa podlaczone.
+!!
+!!   output.1 = DP-1 mode=2560x1440@144 pos=0,0 scale=1.25 vsync=on
+!!   output.2 = HDMI-A-1 mode=1920x1080 right-of=DP-1 transform=90
+!!   output.3 = eDP-1 below=DP-1 if=DP-1            !! tylko gdy DP-1 jest podlaczony (profil "dock")
+!!   output.4 = eDP-1 pos=0,0 blank=off             !! regula zapasowa (profil "sam laptop")
+!!   output.5 = * scale=1                           !! kazde inne wyjscie
+!!   output.arrange = row                           !! row | column - dla wyjsc bez pos / relacji
+!!
+!! Pierwszy wiersz (output.1 .. output.16), ktorego wzorzec (glob: * i ?) albo numer wyjscia (od 1)
+!! pasuje i ktorego warunek `if=NAZWA[,NAZWA]` jest spelniony, wygrywa. Klucze:
+!!   mode=SZERxWYS[@HZ]   tryb; bez @HZ wybierany jest najwyzszy dostepny refresh
+!!   pos=X,Y              polozenie w ukladzie globalnym
+!!   right-of=N left-of=N below=N above=N   polozenie wzgledem wyjscia o nazwie N
+!!   scale=1.25           skala (liczba z kropka albo calkowita)
+!!   transform=normal|90|180|270   obrot
+!!   vsync=on|off         blank=on|off
+
+const OUTCFG_MAX: Int = 16
+
+!! Wartosc klucza `key` sposrod tokenow `klucz=wartosc` w wierszu (slowa od 1); pusty napis, gdy brak.
+fun outcfg_kv(line: Str, key: Str) -> Str [
+    let words = str_words(line)
+    let i = 1
+    while i < words.len() [
+        let w = words[i].clone()
+        let p = str_find(w, "=", 0)
+        if p > 0 and str_sub(w, 0, p) == key [
+            end str_sub(w, p + 1, str_len(w))
+        ]
+        i = i + 1
+    ]
+    end ""
+]
+
+!! Liczba z ulamkiem dziesietnym ("1.25", "2", "1.5") jako Float; `fallback` przy bledzie.
+fun outcfg_float(s: Str, fallback: Float) -> Float [
+    if str_len(s) == 0 [
+        end fallback
+    ]
+    let dot = str_find(s, ".", 0)
+    if dot < 0 [
+        let v = str_int(s, -1)
+        if v < 0 [
+            end fallback
+        ]
+        end (v as Float)
+    ]
+    let ip = str_int(str_sub(s, 0, dot), -1)
+    if ip < 0 [
+        end fallback
+    ]
+    let frac = str_sub(s, dot + 1, str_len(s))
+    if str_len(frac) > 3 [
+        frac = str_sub(frac, 0, 3)
+    ]
+    let fi = str_int(frac, -1)
+    if fi < 0 [
+        end fallback
+    ]
+    let k = str_len(frac)
+    while k < 3 [
+        fi = fi * 10
+        k = k + 1
+    ]
+    end ((ip * 1000 + fi) as Float) / 1000.0
+]
+
+!! "WxH" albo "WxH@HZ" -> [szerokosc, wysokosc, refresh_mHz (0 = dowolny)]; pusta lista przy bledzie.
+fun outcfg_parse_mode(s: Str) -> List<Int> [
+    let out: List<Int> = []
+    let x = str_find(s, "x", 0)
+    if x <= 0 [
+        end out
+    ]
+    let w = str_int(str_sub(s, 0, x), -1)
+    let rest = str_sub(s, x + 1, str_len(s))
+    let at = str_find(rest, "@", 0)
+    let h = -1
+    let hz = 0
+    if at < 0 [
+        h = str_int(rest, -1)
+    ] else [
+        h = str_int(str_sub(rest, 0, at), -1)
+        hz = str_int(str_sub(rest, at + 1, str_len(rest)), 0) * 1000
+    ]
+    if w <= 0 or h <= 0 [
+        end out
+    ]
+    out.push(w)
+    out.push(h)
+    out.push(hz)
+    end out
+]
+
+!! Indeks trybu o zadanej rozdzielczosci: z `hz_mhz` > 0 - najblizszy refreshem, inaczej o najwyzszym
+!! refreshu. -1, gdy wyjscie nie ma takiej rozdzielczosci.
+fun outcfg_pick_mode(o: Int, w: Int, h: Int, hz_mhz: Int) -> Int [
+    let n = output_mode_count(o)
+    let best = -1
+    let best_score = 0
+    let i = 0
+    while i < n [
+        let m = output_mode(o, i)
+        if m.width == w and m.height == h [
+            let score = m.refresh_mhz
+            if hz_mhz > 0 [
+                let d = m.refresh_mhz - hz_mhz
+                if d < 0 [
+                    d = 0 - d
+                ]
+                score = 1000000 - d
+            ]
+            if best < 0 or score > best_score [
+                best = i
+                best_score = score
+            ]
+        ]
+        i = i + 1
+    ]
+    end best
+]
+
+fun outcfg_transform(s: Str) -> Int [
+    if s == "90" [
+        end 1
+    ]
+    if s == "180" [
+        end 2
+    ]
+    if s == "270" [
+        end 3
+    ]
+    if s == "normal" or s == "0" [
+        end 0
+    ]
+    end -1
+]
+
+fun outcfg_on(s: Str) -> Int [
+    if s == "on" or s == "1" or s == "true" or s == "yes" [
+        end 1
+    ]
+    if s == "off" or s == "0" or s == "false" or s == "no" [
+        end 0
+    ]
+    end -1
+]
+
+!! Uchwyt wyjscia o nazwie `name` albo 0.
+fun outcfg_find(name: Str) -> Int [
+    let hs = output_list()
+    let i = 0
+    while i < hs.len() [
+        if output_name(hs[i]) == name [
+            end hs[i]
+        ]
+        i = i + 1
+    ]
+    end 0
+]
+
+!! Czy wszystkie nazwy z listy `a,b,c` sa teraz podlaczone (pusta lista = tak).
+fun outcfg_present(list: Str) -> Bool [
+    if str_len(list) == 0 [
+        end true
+    ]
+    let names = str_split(list, ",")
+    let i = 0
+    while i < names.len() [
+        if outcfg_find(str_trim(names[i].clone())) == 0 [
+            end false
+        ]
+        i = i + 1
+    ]
+    end true
+]
+
+!! Numer wiersza output.N (1..OUTCFG_MAX) pasujacy do wyjscia `o` (k = jego pozycja na liscie, od 0)
+!! albo 0.
+fun outcfg_rule_for(o: Int, k: Int) -> Int [
+    let name = output_name(o)
+    let n = 1
+    while n <= OUTCFG_MAX [
+        let line = config_get("output." + (n as Str), "")
+        if str_len(line) > 0 [
+            let words = str_words(line)
+            if words.len() > 0 [
+                let pat = words[0].clone()
+                let hit = glob_match(pat, name)
+                if not hit and str_int(pat, 0) == k + 1 [
+                    hit = true
+                ]
+                if hit and outcfg_present(outcfg_kv(line, "if")) [
+                    end n
+                ]
+            ]
+        ]
+        n = n + 1
+    ]
+    end 0
+]
+
+!! Ustawia polozenie `o` wzgledem wyjscia `ref`; false, gdy relacja nie jest znana.
+fun outcfg_place(o: Int, ref: Int, rel: Str) -> Bool [
+    if ref == 0 [
+        end false
+    ]
+    if rel == "right-of" [
+        output_set_pos(o, output_x(ref) + output_width(ref), output_y(ref))
+        end true
+    ]
+    if rel == "left-of" [
+        output_set_pos(o, output_x(ref) - output_width(o), output_y(ref))
+        end true
+    ]
+    if rel == "below" [
+        output_set_pos(o, output_x(ref), output_y(ref) + output_height(ref))
+        end true
+    ]
+    if rel == "above" [
+        output_set_pos(o, output_x(ref), output_y(ref) - output_height(o))
+        end true
+    ]
+    end false
+]
+
+!! Wszystkie wyjscia w jednej kolumnie od gory do dolu (wg kolejnosci output_list).
+fun output_arrange_column() [
+    let hs = output_list()
+    let y = 0
+    let i = 0
+    while i < hs.len() [
+        let h = hs[i]
+        output_set_pos(h, 0, y)
+        y = y + output_height(h)
+        i = i + 1
+    ]
+    end
+]
+
+!! Stosuje konfiguracje wyjsc. Zwraca liczbe wyjsc, dla ktorych znaleziono regule. Tryby, skala, obrot,
+!! vsync i wygaszenie sa ustawiane najpierw (zmieniaja rozmiar), polozenia potem - najpierw jawne `pos=`,
+!! a relacje (right-of itd.) w kilku przejsciach, zeby kolejnosc wierszy nie miala znaczenia.
+fun outputs_apply() -> Int [
+    let hs = output_list()
+    let n = hs.len()
+    let rules: List<Int> = []
+    let matched = 0
+    let k = 0
+    while k < n [
+        let r = outcfg_rule_for(hs[k], k)
+        rules.push(r)
+        if r > 0 [
+            matched = matched + 1
+            let line = config_get("output." + (r as Str), "")
+            let o = hs[k]
+            let m = outcfg_parse_mode(outcfg_kv(line, "mode"))
+            if m.len() == 3 [
+                let idx = outcfg_pick_mode(o, m[0], m[1], m[2])
+                if idx >= 0 [
+                    output_set_mode(o, idx)
+                ]
+            ]
+            let sc = outcfg_float(outcfg_kv(line, "scale"), 0.0)
+            if sc > 0.0 [
+                output_set_scale(o, sc)
+            ]
+            let t = outcfg_transform(outcfg_kv(line, "transform"))
+            if t >= 0 [
+                output_set_transform(o, t)
+            ]
+            let v = outcfg_on(outcfg_kv(line, "vsync"))
+            if v >= 0 [
+                output_set_vsync(o, v == 1)
+            ]
+            let b = outcfg_on(outcfg_kv(line, "blank"))
+            if b >= 0 [
+                output_blank(o, b == 1)
+            ]
+        ]
+        k = k + 1
+    ]
+    let placed: List<Int> = []
+    k = 0
+    while k < n [
+        placed.push(0)
+        k = k + 1
+    ]
+    k = 0
+    while k < n [
+        if rules[k] > 0 [
+            let line = config_get("output." + (rules[k] as Str), "")
+            let p = outcfg_kv(line, "pos")
+            let comma = str_find(p, ",", 0)
+            if comma > 0 [
+                output_set_pos(hs[k], str_int(str_sub(p, 0, comma), 0), str_int(str_sub(p, comma + 1, str_len(p)), 0))
+                placed[k] = 1
+            ]
+        ]
+        k = k + 1
+    ]
+    let pass = 0
+    while pass < n [
+        k = 0
+        while k < n [
+            if rules[k] > 0 and placed[k] == 0 [
+                let line = config_get("output." + (rules[k] as Str), "")
+                let rel = "right-of"
+                let target = outcfg_kv(line, rel)
+                if str_len(target) == 0 [
+                    rel = "left-of"
+                    target = outcfg_kv(line, rel)
+                ]
+                if str_len(target) == 0 [
+                    rel = "below"
+                    target = outcfg_kv(line, rel)
+                ]
+                if str_len(target) == 0 [
+                    rel = "above"
+                    target = outcfg_kv(line, rel)
+                ]
+                if str_len(target) > 0 [
+                    let ref = outcfg_find(target)
+                    let ref_idx = -1
+                    let j = 0
+                    while j < n [
+                        if hs[j] == ref [
+                            ref_idx = j
+                        ]
+                        j = j + 1
+                    ]
+                    if ref_idx >= 0 and (placed[ref_idx] == 1 or rules[ref_idx] == 0) [
+                        if outcfg_place(hs[k], ref, rel) [
+                            placed[k] = 1
+                        ]
+                    ]
+                ]
+            ]
+            k = k + 1
+        ]
+        pass = pass + 1
+    ]
+    let arrange = config_get("output.arrange", "")
+    if arrange == "row" or arrange == "column" [
+        let any_free = false
+        k = 0
+        while k < n [
+            if placed[k] == 0 [
+                any_free = true
+            ]
+            k = k + 1
+        ]
+        if any_free and matched == 0 [
+            if arrange == "row" [
+                output_arrange_row()
+            ] else [
+                output_arrange_column()
+            ]
+        ]
+    ]
+    output_repaint_all()
+    end matched
+]
