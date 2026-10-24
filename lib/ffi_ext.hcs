@@ -927,3 +927,268 @@ fun ffi_file_read() -> Int [
     ]
     end out
 ]
+
+fun ffi_ipc_subscribe() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_ipc_subscribe() -> i64; }
+        out = unsafe { vcn_ipc_subscribe() };
+    ]
+    end out
+]
+
+fun ffi_ipc_publish() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_ipc_publish() -> i64; }
+        out = unsafe { vcn_ipc_publish() };
+    ]
+    end out
+]
+
+fun ffi_ipc_subscribers() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_ipc_subscribers() -> i64; }
+        out = unsafe { vcn_ipc_subscribers() };
+    ]
+    end out
+]
+
+fun ffi_surface_pointer_constraint(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_surface_pointer_constraint(h: i64) -> i64; }
+        out = unsafe { vcn_surface_pointer_constraint(h) };
+    ]
+    end out
+]
+
+fun ffi_surface_pointer_constrained(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_surface_pointer_constrained(h: i64) -> i64; }
+        out = unsafe { vcn_surface_pointer_constrained(h) };
+    ]
+    end out
+]
+
+fun ffi_surface_pointer_constraint_enable(h: Int, on: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_surface_pointer_constraint_enable(h: i64, on: i64); }
+        unsafe { vcn_surface_pointer_constraint_enable(h, on) };
+    ]
+    end
+]
+
+fun ffi_surface_prefers_vsync(h: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_surface_prefers_vsync(h: i64) -> i64; }
+        out = unsafe { vcn_surface_prefers_vsync(h) };
+    ]
+    end out
+]
+
+fun ffi_watch_set() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_watch_set() -> i64; }
+        out = unsafe { vcn_watch_set() };
+    ]
+    end out
+]
+
+fun ffi_watch_poll() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_watch_poll() -> i64; }
+        out = unsafe { vcn_watch_poll() };
+    ]
+    end out
+]
+
+fun ffi_watch_close() [
+    native {Rust} [
+        extern "C" { fn vcn_watch_close(); }
+        unsafe { vcn_watch_close() };
+    ]
+    end
+]
+
+fun ffi_li_clear() [
+    native {Rust} [
+        extern "C" { fn vcn_li_clear(); }
+        unsafe { vcn_li_clear() };
+    ]
+    end
+]
+
+fun ffi_li_add_rule() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_li_add_rule() -> i64; }
+        out = unsafe { vcn_li_add_rule() };
+    ]
+    end out
+]
+
+fun ffi_li_rule_count() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_li_rule_count() -> i64; }
+        out = unsafe { vcn_li_rule_count() };
+    ]
+    end out
+]
+
+fun ffi_li_error() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_li_error() -> i64; }
+        out = unsafe { vcn_li_error() };
+    ]
+    end out
+]
+
+fun ffi_li_apply() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_li_apply() -> i64; }
+        out = unsafe { vcn_li_apply() };
+    ]
+    end out
+]
+
+fun ffi_li_devices() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_li_devices() -> i64; }
+        out = unsafe { vcn_li_devices() };
+    ]
+    end out
+]
+
+fun ffi_screencopy_enable(on: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_screencopy_enable(on: i64) -> i64; }
+        out = unsafe { vcn_screencopy_enable(on) };
+    ]
+    end out
+]
+
+fun ffi_screencopy_sessions() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_screencopy_sessions() -> i64; }
+        out = unsafe { vcn_screencopy_sessions() };
+    ]
+    end out
+]
+
+fun ffi_screencopy_frames() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_screencopy_frames() -> i64; }
+        out = unsafe { vcn_screencopy_frames() };
+    ]
+    end out
+]
+
+fun ffi_i3_listen() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_i3_listen() -> i64; }
+        out = unsafe { vcn_i3_listen() };
+    ]
+    end out
+]
+
+fun ffi_i3_poll() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_i3_poll_c() -> i64; }
+        out = unsafe { vcn_i3_poll_c() };
+    ]
+    end out
+]
+
+fun ffi_i3_type() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_i3_type_c() -> i64; }
+        out = unsafe { vcn_i3_type_c() };
+    ]
+    end out
+]
+
+fun ffi_i3_payload() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_i3_payload() -> i64; }
+        out = unsafe { vcn_i3_payload() };
+    ]
+    end out
+]
+
+fun ffi_i3_reply() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_i3_reply() -> i64; }
+        out = unsafe { vcn_i3_reply() };
+    ]
+    end out
+]
+
+fun ffi_i3_publish(event: Int) -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_i3_publish(event: i64) -> i64; }
+        out = unsafe { vcn_i3_publish(event) };
+    ]
+    end out
+]
+
+fun ffi_i3_clients() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_i3_client_count() -> i64; }
+        out = unsafe { vcn_i3_client_count() };
+    ]
+    end out
+]
+
+fun ffi_i3_chmod(mode: Int) [
+    native {Rust} [
+        extern "C" { fn vcn_i3_chmod(mode: i64); }
+        unsafe { vcn_i3_chmod(mode) };
+    ]
+    end
+]
+
+fun ffi_i3_shutdown() [
+    native {Rust} [
+        extern "C" { fn vcn_i3_shutdown(); }
+        unsafe { vcn_i3_shutdown() };
+    ]
+    end
+]
+
+fun ffi_now_ms() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_now_ms() -> i64; }
+        out = unsafe { vcn_now_ms() };
+    ]
+    end out
+]
+
+fun ffi_strftime() -> Int [
+    let out = 0
+    native {Rust} [
+        extern "C" { fn vcn_strftime() -> i64; }
+        out = unsafe { vcn_strftime() };
+    ]
+    end out
+]
