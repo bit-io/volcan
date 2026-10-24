@@ -1,0 +1,72 @@
+include <config>
+include <strings>
+include <clock>
+include <ffi_ext>
+
+!! Bezczynnosc (blokada ekranu, wygaszanie wyjsc, uspienie). Klucze konfiguracji:
+!!
+!!   idle.1 = 300 : spawn swaylock -f
+!!   idle.2 = 600 : outputs off
+!!   idle.resume = outputs on
+!!
+!! `SEKUNDY : POLECENIE` (polecenie to wm_command albo polecenie fasady, w tym `spawn`, `outputs on|off`). Do 8 progow;
+!! kazdy odpala sie raz od ostatniej aktywnosci. Aktywnosc to klawisz, przycisk, ruch lub przewijanie wskaznika;
+!! po wybudzeniu leci `idle.resume`. Dopoki jakis klient trzyma inhibitor bezczynnosci (wideo, prezentacja),
+!! licznik stoi w miejscu.
+
+const IDLE_MAX: Int = 8
+
+fun idle_enabled() -> Bool [
+    end config_has("idle.1")
+]
+
+!! Zapisuje aktywnosc; zwraca `idle.resume`, jesli wlasnie wybudzamy po odpaleniu progu, inaczej pusty napis.
+fun idle_touch() -> Str [
+    if not idle_enabled() [
+        end ""
+    ]
+    config_set("idle._last", (clock_now_ms() as Str))
+    let fired = config_int("idle._fired", 0)
+    if fired > 0 [
+        config_set("idle._fired", "0")
+        end config_get("idle.resume", "")
+    ]
+    end ""
+]
+
+!! Polecenie, ktorego prog wlasnie minal (najwyzej jedno na wywolanie), albo pusty napis.
+fun idle_due() -> Str [
+    if not idle_enabled() [
+        end ""
+    ]
+    let now = clock_now_ms()
+    if config_has("idle._last") == false [
+        config_set("idle._last", (now as Str))
+        end ""
+    ]
+    if ffi_idle_inhibitor_count() > 0 [
+        config_set("idle._last", (now as Str))
+        end ""
+    ]
+    let elapsed = now - config_int("idle._last", now)
+    let fired = config_int("idle._fired", 0)
+    let k = fired + 1
+    if k > IDLE_MAX [
+        end ""
+    ]
+    let line = config_get("idle." + (k as Str), "")
+    if line == "" [
+        end ""
+    ]
+    let p = str_find(line, ":", 0)
+    if p <= 0 [
+        config_set("idle._fired", (k as Str))
+        end ""
+    ]
+    let secs = str_int(str_trim(str_sub(line, 0, p)), 0)
+    if secs > 0 and elapsed >= secs * 1000 [
+        config_set("idle._fired", (k as Str))
+        end str_trim(str_sub(line, p + 1, str_len(line)))
+    ]
+    end ""
+]
