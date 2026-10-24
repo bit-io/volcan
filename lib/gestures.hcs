@@ -1,0 +1,100 @@
+include <events>
+include <config>
+include <strings>
+
+!! Gesty przesuniecia (swipe wieloma palcami na touchpadzie) jako polecenia zarzadcy okien.
+!! libinput zglasza swipe dopiero od 3 palcow (dwa palce to przewijanie), wiec kazdy EV_SWIPE_* to gest 3+.
+!!
+!!   var g = gesture_new()
+!!   w petli zdarzen:   g = gesture_feed(g, ev)
+!!                      if ev.kind == EV_SWIPE_END [ let cmd = gesture_command(g, ev) ... ]
+!!
+!! Kierunek to ruch palcow: "left" = palce przesunely sie w lewo. Polecenia (do wm_command) mozna
+!! zmienic w konfiguracji; pusty napis wylacza kierunek:
+!!   [gesture]
+!!   threshold = 120          !! minimalne przesuniecie (jednostki touchpada), domyslnie 120
+!!   swipe_left  = workspace next
+!!   swipe_right = workspace prev
+!!   swipe_up    = layout next
+!!   swipe_down  =
+
+struct Gesture [
+    active: Int,
+    dx: Float,
+    dy: Float
+]
+
+fun gesture_new() -> Gesture [
+    end Gesture(0, 0.0, 0.0)
+]
+
+!! Aktualizuje stan gestu zdarzeniem (SWIPE_BEGIN zeruje, SWIPE_UPDATE sumuje delty).
+fun gesture_feed(g: Gesture, ev: Event) -> Gesture [
+    if ev.kind == EV_SWIPE_BEGIN [
+        end Gesture(1, 0.0, 0.0)
+    ]
+    if ev.kind == EV_SWIPE_UPDATE and g.active == 1 [
+        end Gesture(1, g.dx + ev.x, g.dy + ev.y)
+    ]
+    if ev.kind == EV_SWIPE_END [
+        end Gesture(0, g.dx, g.dy)
+    ]
+    end Gesture(g.active, g.dx, g.dy)
+]
+
+fun gesture_abs(v: Float) -> Float [
+    if v < 0.0 [
+        end 0.0 - v
+    ]
+    end v
+]
+
+!! Kierunek zakonczonego gestu: "left" | "right" | "up" | "down" albo "" (anulowany, za krotki,
+!! albo niejednoznaczny). Wolac po EV_SWIPE_END (stan z gesture_feed).
+fun gesture_direction(g: Gesture, ev: Event, threshold: Int) -> Str [
+    if ev.kind != EV_SWIPE_END or ev.a == 1 [
+        end ""
+    ]
+    let ax = gesture_abs(g.dx)
+    let ay = gesture_abs(g.dy)
+    let t = (threshold as Float)
+    if ax >= ay and ax >= t [
+        if g.dx < 0.0 [
+            end "left"
+        ]
+        end "right"
+    ]
+    if ay > ax and ay >= t [
+        if g.dy < 0.0 [
+            end "up"
+        ]
+        end "down"
+    ]
+    end ""
+]
+
+!! Polecenie dla kierunku z konfiguracji ([gesture] swipe_<kierunek>) albo domyslne.
+fun gesture_binding(dir: Str) -> Str [
+    if dir == "left" [
+        end config_get("gesture.swipe_left", "workspace next")
+    ]
+    if dir == "right" [
+        end config_get("gesture.swipe_right", "workspace prev")
+    ]
+    if dir == "up" [
+        end config_get("gesture.swipe_up", "layout next")
+    ]
+    if dir == "down" [
+        end config_get("gesture.swipe_down", "")
+    ]
+    end ""
+]
+
+!! Polecenie wm_command wywolane przez zakonczony gest (pusty napis = nic nie robic).
+fun gesture_command(g: Gesture, ev: Event) -> Str [
+    let dir = gesture_direction(g, ev, config_int("gesture.threshold", 120))
+    if dir == "" [
+        end ""
+    ]
+    end gesture_binding(dir)
+]
