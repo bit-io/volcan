@@ -1,0 +1,27 @@
+#pragma once
+#include <cstdint>
+#include <cstdlib>
+#include <deque>
+#include <memory>
+#include <vector>
+#include <string>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <sys/stat.h>
+#include <signal.h>
+#include <mutex>
+#include <thread>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <errno.h>
+#include <cstring>
+#include <cstdio>
+#include <map>
+#include <chrono>
+#include <algorithm>
+#include <sys/inotify.h>
+#include <libinput.h>
+std::string g_buf0, g_buf1;
