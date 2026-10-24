@@ -1,0 +1,16 @@
+[package]
+-> name        => volcan-tests
+-> version     => 0.1.0
+-> description => Testy czystych modulow volcan (uklady, napisy, konfiguracja, gesty) - nie wymagaja Louvre.
+-> lang        => hs
+
+[build]
+-> link => static
+
+[default-build]
+-> profile => release
+-> run     => true
+
+[dependencies]
+-> volcan
+--> path => ..
