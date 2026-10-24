@@ -25,6 +25,20 @@ include <layer>
 include <session>
 include <wm>
 include <state>
+include <caps>
+include <screencopy>
+include <i3>
+include <idle>
+include <clock>
+include <input_cfg>
+include <outputs_cfg>
+include <gestures>
+include <ipc_events>
+include <startup>
+include <wmx>
+include <bar>
+include <app>
+include <easy>
 
 !! Wersja biblioteki volcan.
 const VOLCAN_VERSION: Str = "0.1.0"
