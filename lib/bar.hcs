@@ -1,0 +1,169 @@
+include <wm>
+include <style>
+include <config>
+include <files>
+include <strings>
+include <clock>
+include <wmx>
+
+!! Prosty pasek stanu rysowany przez kompozytor (nakladki, bez osobnego klienta layer-shell):
+!! przestrzenie robocze (nazwy z workspace.N), tytul fokusowanego okna, nazwa ukladu i linia statusu
+!! z pliku. wm_area() rezerwuje dla niego miejsce na gorze kazdego wyjscia, gdy bar.enabled = true.
+!!
+!!   [bar]
+!!   enabled = true
+!!   height = 24
+!!   status_file = /tmp/volcan-status      !! pierwsza linia pliku pokazuje sie z prawej (np. zegar:
+!!                                         !! while sleep 30; do date +%H:%M > /tmp/volcan-status; done &)
+!!
+!! bar_draw(w) wolaj po kazdej zmianie stanu zarzadcy (app.hcs robi to sam).
+
+const BAR_GROUP: Int = 2
+const BAR_COLOR_BG: Int = 4279308561
+const BAR_COLOR_ACTIVE: Int = 4283210495
+const BAR_COLOR_FG: Int = 4291348680
+const BAR_COLOR_DIM: Int = 4286019447
+const BAR_COLOR_WARN: Int = 4292559428
+
+fun bar_has_windows(w: Wm, ws: Int) -> Bool [
+    let i = 0
+    while i < w.handles.len() [
+        if w.ws[i] == ws and w.scratch[i] == 0 [
+            end true
+        ]
+        i = i + 1
+    ]
+    end false
+]
+
+fun bar_has_urgent(w: Wm, ws: Int) -> Bool [
+    let i = 0
+    while i < w.handles.len() [
+        if w.ws[i] == ws and w.urgent[i] == 1 [
+            end true
+        ]
+        i = i + 1
+    ]
+    end false
+]
+
+!! Rysuje pasek na kazdym wyjsciu (poprzednia zawartosc grupy BAR_GROUP jest czyszczona).
+!! Widzety paska po prawej: bar.widgets = clock:%H:%M | battery | file:/sciezka | layout | text:napis
+!! (oddzielone `|`). battery czyta bar.battery (domyslnie /sys/class/power_supply/BAT0/capacity), file: pierwsza linie pliku.
+fun bar_widget_text(w: Wm, spec: Str) -> Str [
+    let s = str_trim(spec)
+    if str_starts_with(s, "clock:") [
+        end clock_format(str_sub(s, 6, str_len(s)))
+    ]
+    if s == "clock" [
+        end clock_format("%H:%M")
+    ]
+    if s == "battery" [
+        let f = file_read(config_get("bar.battery", "/sys/class/power_supply/BAT0/capacity"))
+        if f.ok [
+            end "BAT " + str_trim(f.data) + "%"
+        ]
+        end ""
+    ]
+    if str_starts_with(s, "file:") [
+        let f = file_read(str_sub(s, 5, str_len(s)))
+        if f.ok [
+            let lines = str_split(f.data, "\n")
+            if lines.len() > 0 [
+                end str_trim(lines[0].clone())
+            ]
+        ]
+        end ""
+    ]
+    if s == "layout" [
+        end layout_name(wm_layout(w))
+    ]
+    if str_starts_with(s, "text:") [
+        end str_sub(s, 5, str_len(s))
+    ]
+    end ""
+]
+
+fun bar_widgets(w: Wm) -> Str [
+    let spec = config_get("bar.widgets", "")
+    if spec == "" [
+        end ""
+    ]
+    let parts = str_split(spec, "|")
+    let out = ""
+    let i = 0
+    while i < parts.len() [
+        let t = bar_widget_text(w, parts[i].clone())
+        if t != "" [
+            if out != "" [
+                out = out + "   "
+            ]
+            out = out + t
+        ]
+        i = i + 1
+    ]
+    end out
+]
+
+fun bar_draw(w: Wm) [
+    overlay_clear_group(BAR_GROUP)
+    if not config_bool("bar.enabled", false) [
+        end
+    ]
+    let height = config_int("bar.height", 24)
+    let outs = output_list()
+    let status = ""
+    let path = config_get("bar.status_file", "")
+    if path != "" [
+        let f = file_read(path)
+        if f.ok [
+            let lines = str_split(f.data, "\n")
+            if lines.len() > 0 [
+                status = str_trim(lines[0].clone())
+            ]
+        ]
+    ]
+    let widgets = bar_widgets(w)
+    if widgets != "" [
+        status = widgets
+    ]
+    let title = ""
+    if w.focus != 0 [
+        title = toplevel_title(w.focus)
+    ]
+    let k = 0
+    while k < outs.len() [
+        let o = outs[k]
+        let x0 = output_x(o)
+        let y0 = output_y(o)
+        let ow = output_width(o)
+        overlay_rect_g(BAR_GROUP, x0, y0, ow, height, BAR_COLOR_BG)
+        let cell = height + 6
+        let n = 0
+        let x = x0 + 4
+        while n < WM_WORKSPACES [
+            let name = wmx_ws_name(n)
+            let used = bar_has_windows(w, n)
+            if n == w.current [
+                overlay_rect_g(BAR_GROUP, x, y0 + 3, cell, height - 6, BAR_COLOR_ACTIVE)
+            ] elif bar_has_urgent(w, n) [
+                overlay_rect_g(BAR_GROUP, x, y0 + 3, cell, height - 6, BAR_COLOR_WARN)
+            ]
+            if used or n == w.current [
+                overlay_text(BAR_GROUP, x + 8, y0 + height - 8, height - 12, BAR_COLOR_FG, name)
+            ] else [
+                overlay_text(BAR_GROUP, x + 8, y0 + height - 8, height - 12, BAR_COLOR_DIM, name)
+            ]
+            x = x + cell + 2
+            n = n + 1
+        ]
+        overlay_text(BAR_GROUP, x + 12, y0 + height - 8, height - 12, BAR_COLOR_FG, title)
+        let right = layout_name(wm_layout(w))
+        if status != "" [
+            right = status + "   " + right
+        ]
+        overlay_text(BAR_GROUP, x0 + ow - 12 - str_len(right) * (height - 12) / 2, y0 + height - 8, height - 12, BAR_COLOR_DIM, right)
+        k = k + 1
+    ]
+    end
+]
